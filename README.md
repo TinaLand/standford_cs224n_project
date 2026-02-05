@@ -12,18 +12,13 @@ This repository implements **MrBERT**, an adaptation of the **dynamic token merg
   - **Inference**: **Hard deletion** — remove token columns where `G_i` is below a threshold (e.g. `k/2 = -15`), then run the rest of the encoder on the shortened sequence to save compute (Section 3.1, Figure 1).
 - **Formulas** (Section 3.1–3.2):
   - **Gate** (Eq. 1): `G = k · σ(LayerNorm(H_l) W + 1_N b)`  
-    Only `2d_model + 1` extra parameters.  
-    *中文解释*: 在第 `l` 层后，对每个 token 计算删除分数 `G_i`。`G_i` 接近 `k = -30` 表示"删除"，接近 `0` 表示"保留"。公式中 `H_l` 是第 `l` 层的输出，`W` 和 `b` 是可学习参数，`σ` 是 sigmoid 函数。
-  - **Soft-deletion attention** (Eq. 2): `attention_scores = QK^T / √d + 1_N G^T`, then softmax (or softmax1) and multiply by `V`.  
-    *中文解释*: 在注意力计算时，把删除门分数 `G` 加到注意力分数上。被标记为删除的 token（`G` 接近 -30）的注意力权重会变得很小，从而被"软屏蔽"（soft masking）。
+    Only `2d_model + 1` extra parameters.
+  - **Soft-deletion attention** (Eq. 2): `attention_scores = QK^T / √d + 1_N G^T`, then softmax (or softmax1) and multiply by `V`.
   - **Gate regularizer** (Eq. 3): `L_G = (1/N) Σ_i G_i`; total loss `L = L_CE + α · L_G`.  
-    Larger `α` encourages more deletion.  
-    *中文解释*: 门正则化损失 `L_G` 是所有 token 删除分数的平均值。总损失 = 任务损失（交叉熵） + `α` × 门损失。`α` 越大，模型越倾向于删除更多 token。
-  - **PI controller** (optional, Eq. 4–6): To hit a target deletion ratio `δ`, the paper updates `α` with a proportional–integral rule.  
-    *中文解释*: PI 控制器自动调整 `α`，使删除比例接近目标值 `δ`（例如 50%）。它使用比例项（P）和积分项（I）来动态更新 `α`，无需手动调参。
+    Larger `α` encourages more deletion.
+  - **PI controller** (optional, Eq. 4–6): To hit a target deletion ratio `δ`, the paper updates `α` with a proportional–integral rule.
   - **Softmax1** (Eq. 7): `softmax1(x)_i = exp(x_i) / (1 + Σ_j exp(x_j))`.  
-    Used so that when all `G_i = k`, the attention weights do not collapse.  
-    *中文解释*: 改进的 softmax，分母多加了 1。当所有 token 都被标记为删除（`G_i` 都接近 `k`）时，标准 softmax 可能失效；Softmax1 能避免注意力权重完全崩溃。
+    Used so that when all `G_i = k`, the attention weights do not collapse.
 - **Gate placement** (Section 3, 7): A single gate is placed after one fixed layer (e.g. layer 3 in the paper) to limit overhead and to allow early layers to build context before deletion (Figure 4).
 
 ---
