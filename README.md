@@ -7,15 +7,23 @@ This repository implements **MrBERT**, an adaptation of the **dynamic token merg
 ## Paper Summary (MrT5)
 
 - **Problem** (Section 1–2): Byte-level models like ByT5 have long sequences and are slow; subword tokenization is sensitive to spelling noise and has uneven compression across languages.
-- **Idea** (Section 3): Insert a **delete gate** after a **fixed encoder layer** \(l\). The gate outputs a score \(G_i \in [k, 0]\) per token (with \(k = -30\)). Tokens with \(G_i\) near \(k\) are treated as “deleted.”
-  - **Training**: **Soft deletion** — add \(G\) to the attention logits of *subsequent* layers so that “deleted” positions are softly masked; the process stays differentiable (Section 3.1, Figure 1).
-  - **Inference**: **Hard deletion** — remove token columns where \(G_i\) is below a threshold (e.g. \(k/2\)), then run the rest of the encoder on the shortened sequence to save compute (Section 3.1, Figure 1).
+- **Idea** (Section 3): Insert a **delete gate** after a **fixed encoder layer** `l`. The gate outputs a score `G_i ∈ [k, 0]` per token (with `k = -30`). Tokens with `G_i` near `k` are treated as “deleted.”
+  - **Training**: **Soft deletion** — add `G` to the attention logits of *subsequent* layers so that “deleted” positions are softly masked; the process stays differentiable (Section 3.1, Figure 1).
+  - **Inference**: **Hard deletion** — remove token columns where `G_i` is below a threshold (e.g. `k/2 = -15`), then run the rest of the encoder on the shortened sequence to save compute (Section 3.1, Figure 1).
 - **Formulas** (Section 3.1–3.2):
-  - **Gate**: \(G = k \cdot \sigma(\mathrm{LayerNorm}(H_l) W + \mathbf{1}_N b)\) — Eq. (1). Only \(2d_{\mathrm{model}}+1\) extra parameters.
-  - **Soft-deletion attention**: \(\mathrm{attention\_scores} \leftarrow \frac{QK^\top}{\sqrt{d}} + \mathbf{1}_N G^\top\) then softmax (or softmax1) and multiply by \(V\) — Eq. (2).
-  - **Gate regularizer**: \(L_G = \frac{1}{N}\sum_i G_i\); total loss \(L = L_{\mathrm{CE}} + \alpha L_G\) — Eq. (3). Larger \(\alpha\) encourages more deletion.
-  - **PI controller** (optional): To hit a target deletion ratio \(\delta\), the paper updates \(\alpha\) with a proportional–integral rule — Eq. (4)–(6).
-  - **Softmax1**: \(({\rm softmax1}(x))_i = \exp(x_i) / (1 + \sum_j \exp(x_j))\) — Eq. (7). Used so that when all \(G_i = k\), the attention weights do not collapse.
+  - **Gate** (Eq. 1): `G = k · σ(LayerNorm(H_l) W + 1_N b)`  
+    Only `2d_model + 1` extra parameters.  
+    *中文解释*: 在第 `l` 层后，对每个 token 计算删除分数 `G_i`。`G_i` 接近 `k = -30` 表示"删除"，接近 `0` 表示"保留"。公式中 `H_l` 是第 `l` 层的输出，`W` 和 `b` 是可学习参数，`σ` 是 sigmoid 函数。
+  - **Soft-deletion attention** (Eq. 2): `attention_scores = QK^T / √d + 1_N G^T`, then softmax (or softmax1) and multiply by `V`.  
+    *中文解释*: 在注意力计算时，把删除门分数 `G` 加到注意力分数上。被标记为删除的 token（`G` 接近 -30）的注意力权重会变得很小，从而被"软屏蔽"（soft masking）。
+  - **Gate regularizer** (Eq. 3): `L_G = (1/N) Σ_i G_i`; total loss `L = L_CE + α · L_G`.  
+    Larger `α` encourages more deletion.  
+    *中文解释*: 门正则化损失 `L_G` 是所有 token 删除分数的平均值。总损失 = 任务损失（交叉熵） + `α` × 门损失。`α` 越大，模型越倾向于删除更多 token。
+  - **PI controller** (optional, Eq. 4–6): To hit a target deletion ratio `δ`, the paper updates `α` with a proportional–integral rule.  
+    *中文解释*: PI 控制器自动调整 `α`，使删除比例接近目标值 `δ`（例如 50%）。它使用比例项（P）和积分项（I）来动态更新 `α`，无需手动调参。
+  - **Softmax1** (Eq. 7): `softmax1(x)_i = exp(x_i) / (1 + Σ_j exp(x_j))`.  
+    Used so that when all `G_i = k`, the attention weights do not collapse.  
+    *中文解释*: 改进的 softmax，分母多加了 1。当所有 token 都被标记为删除（`G_i` 都接近 `k`）时，标准 softmax 可能失效；Softmax1 能避免注意力权重完全崩溃。
 - **Gate placement** (Section 3, 7): A single gate is placed after one fixed layer (e.g. layer 3 in the paper) to limit overhead and to allow early layers to build context before deletion (Figure 4).
 
 ---
@@ -27,7 +35,7 @@ Below is a concise list of **what was implemented** and **where in the paper** i
 ### 1. Delete gate (paper Section 3.1, Eq. (1))
 
 - **What**: After a fixed encoder layer `gate_layer_index` (default 3), we compute  
-  \(G = k \cdot \sigma(\mathrm{LayerNorm}(H) W + b)\) with \(k = -30\).
+  `G = k · σ(LayerNorm(H) W + b)` with `k = -30`.
 - **Where in code**: `mrbert/modeling_mrbert.py` — `DeleteGate` class; `MrBertModel._encoder_forward_with_gate` calls it after the first `gate_layer_index + 1` BERT layers.
 - **Why**: Paper Eq. (1). We use standard LayerNorm (BERT uses it); the paper uses RMSNorm in T5.
 
@@ -37,32 +45,32 @@ Below is a concise list of **what was implemented** and **where in the paper** i
   `attention_scores = QK^T/sqrt(d) + attention_mask + gate_broadcast`,  
   then softmax1 (or softmax) and multiply by V, then pass through the rest of the layer (output projection, residual, FFN).
 - **Where in code**: `_run_layer_with_soft_gate()` in `modeling_mrbert.py`; it is used for layers `gate_layer_index+1` through the last when `use_soft_deletion=True`.
-- **Why**: Paper Eq. (2): the gate is added to the key dimension so that positions with \(G_j \approx k\) get strongly down-weighted. We broadcast \(G\) as `(batch, 1, 1, seq_len)` so it is added to every query position.
+- **Why**: Paper Eq. (2): the gate is added to the key dimension so that positions with `G_j ≈ k` get strongly down-weighted. We broadcast `G` as `(batch, 1, 1, seq_len)` so it is added to every query position.
 
 ### 3. Hard deletion at inference (paper Section 3.1)
 
-- **What**: After the gate layer, we compute a boolean mask “keep” where \(G > k \cdot \mathtt{gate\_threshold\_ratio}\) (default 0.5, i.e. \(k/2\)). We keep only those positions, pad to a common length per batch, and run the remaining BERT layers on this shortened sequence with a new attention mask.
+- **What**: After the gate layer, we compute a boolean mask “keep” where `G > k · gate_threshold_ratio` (default 0.5, i.e. `k/2 = -15`). We keep only those positions, pad to a common length per batch, and run the remaining BERT layers on this shortened sequence with a new attention mask.
 - **Where in code**: `_encoder_forward_with_gate()` when `use_soft_deletion=False` (e.g. `model.eval()`): we slice hidden states and build a new attention mask for the kept positions.
 - **Why**: Paper Section 3.1 and Figure 1: “hard deletion via column removal” at test time to reduce sequence length and gain speed.
 
 ### 4. Gate regularizer (paper Section 3.2, Eq. (3))
 
-- **What**: Loss term \(L_G = \frac{1}{N}\sum_i G_i\). We add \(\alpha L_G\) to the cross-entropy loss; \(\alpha\) is set by the user (e.g. `gate_regularizer_weight=1e-4`) or by the PI controller.
+- **What**: Loss term `L_G = (1/N) Σ_i G_i`. We add `α · L_G` to the cross-entropy loss; `α` is set by the user (e.g. `gate_regularizer_weight=1e-4`) or by the PI controller.
 - **Where in code**: `MrBertModel.get_gate_regularizer_loss(gate)`; `MrBertForSequenceClassification.forward(..., gate_regularizer_weight=...)` adds it to the total loss.
-- **Why**: Paper Eq. (3): “encourages them to be more negative (i.e. closer to k)”, so the model learns to delete more when \(\alpha\) is larger.
+- **Why**: Paper Eq. (3): “encourages them to be more negative (i.e. closer to k)”, so the model learns to delete more when `α` is larger.
 
 ### 5. Softmax1 (paper Section 3.2, Eq. (7))
 
 - **What**: In layers that use the gate, we use  
-  \(({\rm softmax1}(x))_i = \exp(x_i) / (1 + \sum_j \exp(x_j))\) instead of standard softmax on attention scores.
+  `softmax1(x)_i = exp(x_i) / (1 + Σ_j exp(x_j))` instead of standard softmax on attention scores.
 - **Where in code**: `softmax1()` in `modeling_mrbert.py`; used in `_run_layer_with_soft_gate()` when `use_softmax1=True`.
-- **Why**: Paper Section 3.2: if all \(G_i = k\), adding the same constant to every logit does not change standard softmax; with softmax1, very negative scores yield near-zero attention and avoid the “all deleted” failure.
+- **Why**: Paper Section 3.2: if all `G_i = k`, adding the same constant to every logit does not change standard softmax; with softmax1, very negative scores yield near-zero attention and avoid the “all deleted” failure.
 
 ### 6. PI controller for target deletion ratio (paper Section 3.2, Eq. (4)–(6))
 
-- **What**: To steer the fraction of deleted tokens toward a target \(\delta\), we update \(\alpha\) each step using a proportional–integral rule with an exponential moving average on the P term.
+- **What**: To steer the fraction of deleted tokens toward a target `δ`, we update `α` each step using a proportional–integral rule with an exponential moving average on the P term.
 - **Where in code**: `mrbert/pi_controller.py` — `PIController.step(gate, gate_k)`; used in `run_mrbert_example.py` and `train_mrbert.py` when `--use_pi` is set.
-- **Why**: Paper Eq. (4)–(6): “optimize for a specific ratio of deleted tokens” without hand-tuning \(\alpha\).
+- **Why**: Paper Eq. (4)–(6): “optimize for a specific ratio of deleted tokens” without hand-tuning `α`.
 
 ### 7. Config and gate placement (paper Section 3, 7)
 
