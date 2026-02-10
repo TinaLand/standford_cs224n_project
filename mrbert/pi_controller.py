@@ -1,12 +1,13 @@
 """
-PI controller for targeting a specific deletion ratio (paper Section 3.2).
-Updates alpha dynamically: alpha_{t+1} = clamp(kp * p_{t+1} + ki * i_{t+1}).
+PI controller for targeting a specific deletion ratio (paper Section 3.2, Eq.(4)-(6)).
+Updates alpha each step: P term (EMA of error), I term (integral of error),
+alpha = max(0, kp * P + ki * I), so deletion ratio tracks target_deletion_ratio.
 """
 import torch
 
 
 class PIController:
-    """Proportional-Integral controller for gate regularizer weight alpha."""
+    """Proportional-Integral controller for gate regularizer weight alpha (paper Eq.4-6)."""
 
     def __init__(self, target_ratio: float, kp: float = 0.5, ki: float = 1e-5, gamma: float = 0.9):
         self.target_ratio = target_ratio

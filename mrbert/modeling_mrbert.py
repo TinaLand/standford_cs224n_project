@@ -14,13 +14,15 @@ from .configuration_mrbert import MrBertConfig
 
 
 def softmax1(x, dim=-1):
-    """Softmax1 from paper: (softmax1(x))_i = exp(x_i) / (1 + sum_j exp(x_j))."""
+    """Softmax1 from paper Eq.(7): (softmax1(x))_i = exp(x_i) / (1 + sum_j exp(x_j)).
+    Used so that when all G_i = k, attention weights do not collapse."""
     exp_x = torch.exp(x - x.max(dim=dim, keepdim=True).values)
     return exp_x / (1 + exp_x.sum(dim=dim, keepdim=True))
 
 
 class DeleteGate(nn.Module):
-    """Delete gate: G = k * sigmoid(LayerNorm(H) W + b), output in [k, 0]."""
+    """Delete gate, paper Eq.(1): G = k * sigma(LayerNorm(H_l) W + 1_N b), output in [k, 0].
+    Only 2*d_model + 1 extra parameters (LayerNorm, W, b)."""
 
     def __init__(self, config: MrBertConfig):
         super().__init__()
@@ -46,7 +48,9 @@ def _run_layer_with_soft_gate(
     use_softmax1: bool,
     head_mask: torch.Tensor | None = None,
 ) -> torch.Tensor:
-    """Run one BERT layer with gate added to attention scores (soft deletion)."""
+    """Run one BERT layer with soft deletion (paper Section 3.1, Eq.(2)):
+    attention_scores = QK^T/sqrt(d) + attention_mask + 1_N G^T, then softmax1 (or softmax) and multiply by V.
+    Fully differentiable; sequence length unchanged during training."""
     # Self-attention with gate
     self_attn = layer.attention.self
     batch, seq_len, _ = hidden_states.shape
@@ -106,7 +110,7 @@ class MrBertModel(BertModel):
         return model
 
     def get_gate_regularizer_loss(self, gate: torch.Tensor) -> torch.Tensor:
-        """L_G = (1/N) * sum_i G_i; encourages more deletion (more negative G)."""
+        """Gate regularizer, paper Eq.(3): L_G = (1/N) * sum_i G_i; total loss L = L_CE + alpha * L_G."""
         return gate.mean()
 
     def _encoder_forward_with_gate(
@@ -143,11 +147,14 @@ class MrBertModel(BertModel):
                 None,
             )
         else:
-            # Hard deletion: keep tokens where G > threshold, then run remaining layers on shortened sequence
+            # Hard deletion (paper Section 3.1): keep tokens where G > threshold, shorten sequence, update mask
             threshold = self.gate_k * self.gate_threshold_ratio
             batch, seq_len, hidden_size = hidden_states.shape
             device = hidden_states.device
             keep_masks = gate > threshold  # (batch, seq_len)
+            # BERT: force-keep [CLS] (index 0) so pooler and classification head get a valid token
+            if getattr(self.mrbert_config, "force_keep_cls", True):
+                keep_masks[:, 0] = True
             kept_lengths = keep_masks.sum(dim=1)  # (batch,)
             max_kept = kept_lengths.max().item()
             if max_kept == 0:
@@ -339,6 +346,7 @@ class MrBertForSequenceClassification(nn.Module):
         loss = None
         if labels is not None:
             loss = F.cross_entropy(logits, labels)
+        # Paper Eq.(3): L = L_CE + alpha * L_G; alpha = gate_regularizer_weight (or from PI controller)
         gate_loss = self.mrbert.get_gate_regularizer_loss(gate) * gate_regularizer_weight if gate is not None else 0.0
         if loss is not None and gate_loss != 0:
             loss = loss + gate_loss

@@ -1,7 +1,9 @@
 #!/usr/bin/env python3
 """
 Train MrBERT on a real dataset (e.g. GLUE MRPC or IMDB).
-Uses train/validation data and gate regularizer + optional PI controller.
+Loss: L = L_CE + alpha * L_G (paper Eq.3); alpha = gate_weight or from PI controller.
+Optional two-phase: Phase A = gate adaptation (first N steps with gate regularizer),
+Phase B = task finetuning (same loss, typically lower gate_weight).
 """
 import argparse
 import torch
@@ -79,6 +81,10 @@ def main():
     parser.add_argument("--gate_weight", type=float, default=1e-4, help="Gate regularizer weight (alpha)")
     parser.add_argument("--use_pi", action="store_true", help="Use PI controller for target deletion ratio")
     parser.add_argument("--target_deletion", type=float, default=0.5, help="Target deletion ratio (for PI)")
+    parser.add_argument("--phase1_steps", type=int, default=0,
+                        help="Phase A: first N steps with --phase1_gate_weight (gate adaptation); 0 = disabled")
+    parser.add_argument("--phase1_gate_weight", type=float, default=1e-3,
+                        help="Gate regularizer weight during phase 1 (gate adaptation)")
     args = parser.parse_args()
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -108,6 +114,8 @@ def main():
         model.train()
         epoch_loss = 0.0
         for batch in train_loader:
+            # Two-phase: Phase A = gate adaptation (first phase1_steps), Phase B = task finetuning
+            alpha = args.phase1_gate_weight if (args.phase1_steps > 0 and step < args.phase1_steps) else gate_regularizer_weight
             optimizer.zero_grad()
             input_ids = batch["input_ids"].to(device)
             attention_mask = batch["attention_mask"].to(device)
@@ -116,7 +124,7 @@ def main():
                 input_ids=input_ids,
                 attention_mask=attention_mask,
                 labels=labels,
-                gate_regularizer_weight=gate_regularizer_weight,
+                gate_regularizer_weight=alpha,
             )
             loss = out["loss"]
             loss.backward()
@@ -125,6 +133,8 @@ def main():
             step += 1
             if pi is not None and out.get("gate") is not None:
                 gate_regularizer_weight = pi.step(out["gate"], gate_k=-30.0)
+            if step == args.phase1_steps and args.phase1_steps > 0:
+                print(f"  Phase A done at step {step}; switching to Phase B (gate_weight={gate_regularizer_weight:.2e})")
             if step % 100 == 0:
                 print(f"  step {step}/{total_steps} loss: {loss.item():.4f}")
 
