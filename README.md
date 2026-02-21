@@ -163,6 +163,48 @@ gate_regularizer_weight = controller.step(gate, gate_k=-30.0)
 python inspect_data.py --dataset mrpc
 ```
 
+### 7. Run all experiments and update results table
+
+```bash
+# Run baseline + MrBERT on MRPC, IMDB (and optionally SNLI). Results appended to results/train_results.jsonl.
+./run_experiments.sh
+
+# Optional: skip SNLI (faster)
+SKIP_SNLI=1 ./run_experiments.sh
+
+# Regenerate RESULTS.md (reads train_results.jsonl + results/latency_results.json if present)
+python scripts/aggregate_results.py
+
+# Optional: run latency benchmark and write to results/latency_results.json (then re-run aggregate_results)
+python latency_benchmark.py --output_result results/latency_results.json
+```
+
+### 8. Gate interpretability (which tokens are deleted?)
+
+```bash
+# Per-token gate score and KEEP/DEL
+python gate_interpretability.py
+
+# Deletion rate by token type (word / subword / punctuation)
+python gate_interpretability.py --stats
+```
+
+---
+
+## Report outline / Code walkthrough
+
+For a written or oral report, you can structure the implementation as follows:
+
+1. **DeleteGate placement**  
+   The gate is inserted after **layer 3** (0-based). The first 4 layers run normally; then we compute `G = k·σ(LayerNorm(H)W+b)` and use it in all subsequent layers. Early placement maximizes compute savings (paper Section 3, Figure 4).
+
+2. **Soft vs hard deletion**  
+   **Training**: `use_soft_deletion=True` — gate is added to attention logits; sequence length unchanged; fully differentiable.  
+   **Inference**: `use_soft_deletion=False` — tokens with `G < k/2` are removed; hidden states and attention mask are shortened; rest of the encoder runs on fewer tokens.
+
+3. **Softmax1**  
+   In gated layers we use `softmax1` instead of softmax so that when all gates are `k`, attention does not collapse (paper Eq. (7)).
+
 ---
 
 ## Project Structure
@@ -173,8 +215,12 @@ python inspect_data.py --dataset mrpc
 | `mrbert/modeling_mrbert.py` | `DeleteGate`, `MrBertModel` (soft/hard deletion in encoder), `MrBertForSequenceClassification`; gate regularizer and optional gate return. |
 | `mrbert/pi_controller.py` | PI controller for target deletion ratio (paper Eq. (4)–(6)). |
 | `run_mrbert_example.py` | Minimal demo: 2 sentences, 3 steps, no real dataset. |
-| `train_mrbert.py` | Training on HuggingFace datasets (mrpc / imdb / sst2). |
+| `train_mrbert.py` | Training on HuggingFace datasets (mrpc / imdb / sst2 / snli). |
+| `run_experiments.sh` | Run baseline + MrBERT on MRPC, IMDB, SNLI; append results to `results/train_results.jsonl`. |
+| `scripts/aggregate_results.py` | Read JSONL and update `RESULTS.md` comparison table. |
+| `gate_interpretability.py` | Per-token gate scores and deletion-by-token-type stats. |
 | `inspect_data.py` | Print dataset description and sample rows. |
+| `RESULTS.md` | Accuracy and latency comparison table (filled by aggregate_results.py). |
 | `DATA_README.md` | Data source and label meaning for mrpc / imdb / sst2. |
 | `dynamic_token.pdf` | MrT5 paper (ICLR 2025). |
 

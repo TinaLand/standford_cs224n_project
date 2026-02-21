@@ -1,0 +1,1 @@
+{"dataset": "mrpc", "gate_weight": 0.0, "use_pi": false, "target_deletion": 0.5, "val_acc": 0.6887, "epochs": 1, "batch_size": 8}
