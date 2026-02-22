@@ -1,0 +1,11 @@
+{
+  "baseline_ms": 1310.57,
+  "mrbert_ms": 1853.48,
+  "speedup_pct": -41.43,
+  "seq_len_original": 512,
+  "seq_len_soft": 512,
+  "seq_len_hard": 359,
+  "batch_size": 16,
+  "steps": 50,
+  "device": "cpu"
+}

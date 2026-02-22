@@ -1,24 +1,24 @@
 # Experiment Results
 
-Comparison: **Baseline BERT** (no gate) vs **MrBERT** (gate + PI, target deletion ~50%).
+Comparison: Baseline BERT (no gate) vs MrBERT (gate + PI, target deletion ~50%).
 
-## Accuracy
+| Model | Dataset | Deletion | Actual Del% | Val Acc | Avg Loss | Time(s) | Alpha |
+|-------|---------|----------|-------------|--------|----------|---------|-------|
+| Baseline BERT | MRPC | 0% | 40.45% | 69.85% | 0.6039 | 356.6 | — |
+| MrBERT | MRPC | ~50% | 74.45% | 71.81% | 0.5949 | 364.8 | 0.00e+00 |
+| Baseline BERT | SNLI | 0% | 65.27% | 37.56% | 0.9766 | 1195.4 | — |
+| MrBERT | SNLI | ~50% | 80.71% | 69.74% | 0.8330 | 1106.4 | 0.00e+00 |
+| MrBERT | IMDB | ~50% | — | 84.78% | — | — | — |
+| Baseline BERT | IMDB | 0% | — | *(run baseline)* | — | — | — |
 
-| Model | Dataset | Deletion | Val Accuracy |
-|-------|---------|----------|--------------|
-| Baseline BERT | MRPC | 0% | *(run baseline to fill)* |
-| MrBERT | MRPC | ~50% | 68.4% |
-| Baseline BERT | IMDB | 0% | *(run baseline to fill)* |
-| MrBERT | IMDB | ~50% | 84.8% |
+## Latency & sequence length (from latency_benchmark.py)
 
-*After running `./run_experiments.sh` and then `python scripts/aggregate_results.py`, this table is updated from `results/train_results.jsonl`.*
+| Setting | Seq length | Avg time (ms) |
+|---------|------------|---------------|
+| Baseline BERT | 512 | 1310.57 |
+| MrBERT (soft) | 512 | — |
+| MrBERT (hard) | 359 | 1853.48 |
 
-## Latency (from latency_benchmark.py)
+**Speedup:** -41.4% (positive = MrBERT faster).
 
-| Setting | Seq length (after gate) | Avg time (CPU) |
-|---------|-------------------------|----------------|
-| Soft deletion (train) | 512 | — |
-| Hard deletion (eval)  | 275 | ~1504 ms |
-| Baseline BERT         | 512 | ~1322 ms |
-
-On CPU, MrBERT hard-deletion is currently slower due to custom attention path; GPU benchmark expected to show speedup.
+Run: `python latency_benchmark.py --output_result results/latency_results.json` to refresh.
