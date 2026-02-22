@@ -12,13 +12,53 @@ from torch.utils.data import DataLoader
 from transformers import BertTokenizer
 from datasets import load_dataset
 
-from mrbert import MrBertForSequenceClassification
+from mrbert import MrBertForSequenceClassification, MrBertForQuestionAnswering
 from mrbert.pi_controller import PIController
 
 
+def _prepare_tydiqa_example(ex, tokenizer, max_length):
+    """Tokenize one TyDi QA example and compute start/end token positions. Drops if answer not in span."""
+    question = ex["question"]
+    context = ex["context"]
+    answers = ex["answers"]
+    if not answers or not answers["text"] or not answers["answer_start"]:
+        return None
+    answer_start_char = answers["answer_start"][0]
+    answer_text = answers["text"][0]
+    answer_end_char = answer_start_char + len(answer_text)
+    inputs = tokenizer(
+        question,
+        context,
+        truncation=True,
+        max_length=max_length,
+        padding="max_length",
+        return_offsets_mapping=True,
+        return_tensors=None,
+    )
+    offset_mapping = inputs.pop("offset_mapping")
+    token_type_ids = inputs.get("token_type_ids")
+    start_token = -1
+    end_token = -1
+    for i, (s, e) in enumerate(offset_mapping):
+        if s == 0 and e == 0:
+            continue
+        if token_type_ids and token_type_ids[i] == 0:
+            continue
+        if s <= answer_start_char < e:
+            start_token = i
+        if s < answer_end_char <= e:
+            end_token = i
+            break
+    if start_token < 0 or end_token < 0 or end_token < start_token:
+        return None
+    inputs["start_positions"] = start_token
+    inputs["end_positions"] = end_token
+    return inputs
+
+
 def get_dataset_and_tokenizer(dataset_name: str, max_length: int):
-    """Load dataset and tokenizer. Supports 'mrpc', 'imdb', 'sst2', 'snli'.
-    Returns (train_ds, val_ds, tokenizer, num_labels)."""
+    """Load dataset and tokenizer. Supports 'mrpc', 'imdb', 'sst2', 'snli', 'tydiqa'.
+    Returns (train_ds, val_ds, tokenizer, num_labels, task_type). task_type is 'classification' or 'qa'."""
     tokenizer = BertTokenizer.from_pretrained("bert-base-uncased")
 
     if dataset_name == "mrpc":
@@ -33,6 +73,7 @@ def get_dataset_and_tokenizer(dataset_name: str, max_length: int):
                 return_tensors=None,
             )
         num_labels = 2
+        task_type = "classification"
     elif dataset_name == "imdb":
         ds = load_dataset("imdb")
         def tokenize(ex):
@@ -44,6 +85,7 @@ def get_dataset_and_tokenizer(dataset_name: str, max_length: int):
                 return_tensors=None,
             )
         num_labels = 2
+        task_type = "classification"
     elif dataset_name == "sst2":
         ds = load_dataset("glue", "sst2")
         def tokenize(ex):
@@ -55,6 +97,7 @@ def get_dataset_and_tokenizer(dataset_name: str, max_length: int):
                 return_tensors=None,
             )
         num_labels = 2
+        task_type = "classification"
     elif dataset_name == "snli":
         ds = load_dataset("snli")
         # SNLI has label -1 for some invalid rows; keep only 0, 1, 2
@@ -70,8 +113,59 @@ def get_dataset_and_tokenizer(dataset_name: str, max_length: int):
                 return_tensors=None,
             )
         num_labels = 3  # entailment (0), neutral (1), contradiction (2)
+        task_type = "classification"
+    elif dataset_name == "tydiqa":
+        ds = load_dataset("tydiqa", "secondary_task")
+        def prepare_tydiqa_batch(examples):
+            out = {"input_ids": [], "attention_mask": [], "token_type_ids": [], "start_positions": [], "end_positions": []}
+            for i in range(len(examples["id"])):
+                ex = {k: v[i] for k, v in examples.items()}
+                row = _prepare_tydiqa_example(ex, tokenizer, max_length)
+                if row is None:
+                    continue
+                out["input_ids"].append(row["input_ids"])
+                out["attention_mask"].append(row["attention_mask"])
+                out["token_type_ids"].append(row["token_type_ids"])
+                out["start_positions"].append(row["start_positions"])
+                out["end_positions"].append(row["end_positions"])
+            return out
+        def map_tydiqa(split_ds):
+            mapped = split_ds.map(
+                lambda ex: _prepare_tydiqa_example(
+                    {k: ex[k][0] for k in ex},
+                    tokenizer,
+                    max_length,
+                ),
+                remove_columns=split_ds.column_names,
+                num_proc=1,
+            )
+            filtered = [x for x in mapped if x is not None]
+            if not filtered:
+                return split_ds.flatten_indices()
+            from datasets import Dataset
+            return Dataset.from_list(filtered)
+        train_raw = ds["train"]
+        val_raw = ds["validation"]
+        train_list = []
+        for i in range(len(train_raw)):
+            ex = train_raw[i]
+            row = _prepare_tydiqa_example(ex, tokenizer, max_length)
+            if row is not None:
+                train_list.append(row)
+        from datasets import Dataset
+        train_ds = Dataset.from_list(train_list)
+        val_list = []
+        for i in range(len(val_raw)):
+            ex = val_raw[i]
+            row = _prepare_tydiqa_example(ex, tokenizer, max_length)
+            if row is not None:
+                val_list.append(row)
+        val_ds = Dataset.from_list(val_list)
+        train_ds.set_format("torch", columns=["input_ids", "attention_mask", "token_type_ids", "start_positions", "end_positions"])
+        val_ds.set_format("torch", columns=["input_ids", "attention_mask", "token_type_ids", "start_positions", "end_positions"])
+        return train_ds, val_ds, tokenizer, None, "qa"
     else:
-        raise ValueError(f"Unknown dataset: {dataset_name}. Use mrpc, imdb, sst2, or snli.")
+        raise ValueError(f"Unknown dataset: {dataset_name}. Use mrpc, imdb, sst2, snli, or tydiqa.")
 
     # Keep 'label' (and 'idx' if present)
     train_remove_cols = [c for c in ds["train"].column_names if c not in ("label", "idx")]
@@ -86,13 +180,13 @@ def get_dataset_and_tokenizer(dataset_name: str, max_length: int):
         val_ds = ds["test"].map(tokenize, batched=True, remove_columns=val_remove_cols)
     val_ds.set_format("torch", columns=["input_ids", "attention_mask", "label"])
 
-    return train_ds, val_ds, tokenizer, num_labels
+    return train_ds, val_ds, tokenizer, num_labels, task_type
 
 
 def main():
     parser = argparse.ArgumentParser(description="Train MrBERT on a classification dataset")
-    parser.add_argument("--dataset", type=str, default="mrpc", choices=["mrpc", "imdb", "sst2", "snli"],
-                        help="Dataset: mrpc, imdb, sst2, or snli")
+    parser.add_argument("--dataset", type=str, default="mrpc", choices=["mrpc", "imdb", "sst2", "snli", "tydiqa"],
+                        help="Dataset: mrpc, imdb, sst2, snli, or tydiqa")
     parser.add_argument("--max_length", type=int, default=128, help="Max sequence length")
     parser.add_argument("--batch_size", type=int, default=16, help="Train batch size")
     parser.add_argument("--epochs", type=int, default=3, help="Number of epochs")
@@ -114,20 +208,29 @@ def main():
     print(f"Device: {device}")
     print(f"Loading dataset: {args.dataset}")
 
-    train_ds, val_ds, tokenizer, num_labels = get_dataset_and_tokenizer(args.dataset, args.max_length)
+    train_ds, val_ds, tokenizer, num_labels, task_type = get_dataset_and_tokenizer(args.dataset, args.max_length)
     if args.max_train_samples is not None:
         train_ds = train_ds.select(range(min(args.max_train_samples, len(train_ds))))
         print(f"Using first {len(train_ds)} train samples (--max_train_samples)")
     train_loader = DataLoader(train_ds, batch_size=args.batch_size, shuffle=True)
     val_loader = DataLoader(val_ds, batch_size=args.batch_size)
 
-    model = MrBertForSequenceClassification.from_bert_pretrained(
-        "bert-base-uncased",
-        num_labels=num_labels,
-        gate_layer_index=3,
-        gate_k=-30.0,
-        attn_implementation="eager",
-    )
+    is_qa = task_type == "qa"
+    if is_qa:
+        model = MrBertForQuestionAnswering.from_bert_pretrained(
+            "bert-base-uncased",
+            gate_layer_index=3,
+            gate_k=-30.0,
+            attn_implementation="eager",
+        )
+    else:
+        model = MrBertForSequenceClassification.from_bert_pretrained(
+            "bert-base-uncased",
+            num_labels=num_labels,
+            gate_layer_index=3,
+            gate_k=-30.0,
+            attn_implementation="eager",
+        )
     model = model.to(device)
     optimizer = torch.optim.AdamW(model.parameters(), lr=args.lr)
     pi = PIController(target_ratio=args.target_deletion, kp=0.5, ki=1e-5) if args.use_pi else None
@@ -149,18 +252,32 @@ def main():
         model.train()
         epoch_loss = 0.0
         for batch in train_loader:
-            # Two-phase: Phase A = gate adaptation (first phase1_steps), Phase B = task finetuning
             alpha = args.phase1_gate_weight if (args.phase1_steps > 0 and step < args.phase1_steps) else gate_regularizer_weight
             optimizer.zero_grad()
             input_ids = batch["input_ids"].to(device)
             attention_mask = batch["attention_mask"].to(device)
-            labels = batch["label"].to(device)
-            out = model(
-                input_ids=input_ids,
-                attention_mask=attention_mask,
-                labels=labels,
-                gate_regularizer_weight=alpha,
-            )
+            token_type_ids = batch.get("token_type_ids")
+            if token_type_ids is not None:
+                token_type_ids = token_type_ids.to(device)
+            if is_qa:
+                start_positions = batch["start_positions"].to(device)
+                end_positions = batch["end_positions"].to(device)
+                out = model(
+                    input_ids=input_ids,
+                    attention_mask=attention_mask,
+                    token_type_ids=token_type_ids,
+                    start_positions=start_positions,
+                    end_positions=end_positions,
+                    gate_regularizer_weight=alpha,
+                )
+            else:
+                labels = batch["label"].to(device)
+                out = model(
+                    input_ids=input_ids,
+                    attention_mask=attention_mask,
+                    labels=labels,
+                    gate_regularizer_weight=alpha,
+                )
             loss = out["loss"]
             loss.backward()
             optimizer.step()
@@ -168,7 +285,6 @@ def main():
             step += 1
             if pi is not None and out.get("gate") is not None:
                 gate_regularizer_weight = pi.step(out["gate"], gate_k=gate_k)
-            # Accumulate gate stats (only when gate is present, i.e. MrBERT)
             gate = out.get("gate")
             if gate is not None:
                 with torch.no_grad():
@@ -189,21 +305,43 @@ def main():
     # Validation
     model.eval()
     correct, total = 0, 0
+    qa_exact_match = 0
     with torch.no_grad():
         for batch in val_loader:
             input_ids = batch["input_ids"].to(device)
             attention_mask = batch["attention_mask"].to(device)
-            labels = batch["label"].to(device)
-            out = model(
-                input_ids=input_ids,
-                attention_mask=attention_mask,
-                gate_regularizer_weight=0.0,
-            )
-            preds = out["logits"].argmax(dim=1)
-            correct += (preds == labels).sum().item()
-            total += labels.size(0)
-    val_acc = correct / total
-    print(f"Validation accuracy: {val_acc:.4f} ({correct}/{total})")
+            token_type_ids = batch.get("token_type_ids")
+            if token_type_ids is not None:
+                token_type_ids = token_type_ids.to(device)
+            if is_qa:
+                start_positions = batch["start_positions"].to(device)
+                end_positions = batch["end_positions"].to(device)
+                out = model(
+                    input_ids=input_ids,
+                    attention_mask=attention_mask,
+                    token_type_ids=token_type_ids,
+                    gate_regularizer_weight=0.0,
+                )
+                pred_start = out["start_logits"].argmax(dim=1)
+                pred_end = out["end_logits"].argmax(dim=1)
+                qa_exact_match += ((pred_start == start_positions) & (pred_end == end_positions)).sum().item()
+                total += start_positions.size(0)
+            else:
+                labels = batch["label"].to(device)
+                out = model(
+                    input_ids=input_ids,
+                    attention_mask=attention_mask,
+                    gate_regularizer_weight=0.0,
+                )
+                preds = out["logits"].argmax(dim=1)
+                correct += (preds == labels).sum().item()
+                total += labels.size(0)
+    if is_qa:
+        val_acc = qa_exact_match / total if total else 0.0
+        print(f"Validation exact match: {val_acc:.4f} ({qa_exact_match}/{total})")
+    else:
+        val_acc = correct / total if total else 0.0
+        print(f"Validation accuracy: {val_acc:.4f} ({correct}/{total})")
 
     duration_sec = round(time.time() - start_time, 1)
     actual_del_rate = round(sum_del_rate / n_gate_batches, 4) if n_gate_batches else None

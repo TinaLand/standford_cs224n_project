@@ -351,3 +351,68 @@ class MrBertForSequenceClassification(nn.Module):
         if loss is not None and gate_loss != 0:
             loss = loss + gate_loss
         return dict(loss=loss, logits=logits, gate=gate)
+
+
+class MrBertForQuestionAnswering(nn.Module):
+    """MrBERT with a span (QA) head on top for extractive QA (e.g. SQuAD, TyDi QA)."""
+
+    def __init__(self, config: MrBertConfig):
+        super().__init__()
+        self.config = config
+        self.mrbert = MrBertModel(config)
+        self.qa_outputs = nn.Linear(config.hidden_size, 2)  # start and end logits per token
+
+    @classmethod
+    def from_bert_pretrained(cls, bert_name_or_path: str, **mrbert_kwargs):
+        """Load BERT weights and add MrBERT gate; QA head from BertForQuestionAnswering."""
+        from transformers import BertForQuestionAnswering
+
+        bert_qa = BertForQuestionAnswering.from_pretrained(bert_name_or_path)
+        bert_config = bert_qa.config
+        config = MrBertConfig(**{**bert_config.to_dict(), **mrbert_kwargs})
+        model = cls(config)
+        model.mrbert.load_state_dict(bert_qa.bert.state_dict(), strict=False)
+        model.qa_outputs.load_state_dict(bert_qa.qa_outputs.state_dict())
+        return model
+
+    def forward(
+        self,
+        input_ids: torch.Tensor | None = None,
+        attention_mask: torch.Tensor | None = None,
+        token_type_ids: torch.Tensor | None = None,
+        start_positions: torch.Tensor | None = None,
+        end_positions: torch.Tensor | None = None,
+        gate_regularizer_weight: float = 0.0,
+        **kwargs,
+    ):
+        result = self.mrbert.forward(
+            input_ids=input_ids,
+            attention_mask=attention_mask,
+            token_type_ids=token_type_ids,
+            return_gate=True,
+            use_soft_deletion=self.training,
+            **kwargs,
+        )
+        if isinstance(result, tuple):
+            outputs, gate = result
+        else:
+            outputs, gate = result, None
+        sequence_output = outputs.last_hidden_state if hasattr(outputs, "last_hidden_state") else outputs[0]
+        logits = self.qa_outputs(sequence_output)  # (batch, seq_len, 2)
+        start_logits = logits[:, :, 0]
+        end_logits = logits[:, :, 1]
+        loss = None
+        if start_positions is not None and end_positions is not None:
+            loss_fct = nn.CrossEntropyLoss(ignore_index=-100)
+            start_loss = loss_fct(start_logits, start_positions)
+            end_loss = loss_fct(end_logits, end_positions)
+            loss = (start_loss + end_loss) / 2
+        gate_loss = self.mrbert.get_gate_regularizer_loss(gate) * gate_regularizer_weight if gate is not None else 0.0
+        if loss is not None and gate_loss != 0:
+            loss = loss + gate_loss
+        return dict(
+            loss=loss,
+            start_logits=start_logits,
+            end_logits=end_logits,
+            gate=gate,
+        )
