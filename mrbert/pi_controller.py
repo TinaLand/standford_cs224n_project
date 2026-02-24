@@ -17,8 +17,9 @@ class PIController:
         self.p = 0.0
         self.i = 0.0
 
-    def step(self, gate: torch.Tensor, gate_k: float = -30.0) -> float:
-        """Update alpha from current batch gate. gate shape: (batch, seq_len), values in [gate_k, 0]."""
+    def step(self, gate: torch.Tensor, gate_k: float = -30.0, return_state: bool = False):
+        """Update alpha from current batch gate. gate shape: (batch, seq_len), values in [gate_k, 0].
+        If return_state=True, returns (alpha, dict with error, p, i, current_ratio). Otherwise returns alpha."""
         with torch.no_grad():
             threshold = gate_k * 0.5  # paper: k/2
             deleted = (gate < threshold).float()
@@ -28,4 +29,12 @@ class PIController:
         self.p = self.gamma * self.p + (1 - self.gamma) * error
         self.i = self.i + error
         alpha = max(0.0, self.kp * self.p + self.ki * self.i)
+        if return_state:
+            return alpha, {
+                "error": error,
+                "p": self.p,
+                "i": self.i,
+                "alpha": alpha,
+                "current_ratio": current_ratio,
+            }
         return alpha

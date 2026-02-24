@@ -167,6 +167,9 @@ class MrBertModel(BertModel):
                 if len(idx) < max_kept:
                     keep_indices[b, len(idx) :] = idx[-1] if len(idx) > 0 else 0
             # Gather hidden states: (batch, max_kept, hidden_size)
+            if getattr(self.mrbert_config, "log_shapes", False):
+                from .diagnostics import log_shape_after_gate
+                log_shape_after_gate(batch, seq_len, max_kept, hidden_size, gate_layer_index, num_layers=len(layers))
             hidden_states = torch.gather(
                 hidden_states,
                 1,
@@ -343,14 +346,13 @@ class MrBertForSequenceClassification(nn.Module):
             outputs, gate = result, None
         pooler_output = outputs.pooler_output if hasattr(outputs, "pooler_output") else outputs[1]
         logits = self.classifier(self.dropout(pooler_output))
-        loss = None
+        loss_ce = None
         if labels is not None:
-            loss = F.cross_entropy(logits, labels)
-        # Paper Eq.(3): L = L_CE + alpha * L_G; alpha = gate_regularizer_weight (or from PI controller)
-        gate_loss = self.mrbert.get_gate_regularizer_loss(gate) * gate_regularizer_weight if gate is not None else 0.0
-        if loss is not None and gate_loss != 0:
-            loss = loss + gate_loss
-        return dict(loss=loss, logits=logits, gate=gate)
+            loss_ce = F.cross_entropy(logits, labels)
+        # Paper Eq.(3): L = L_CE + alpha * L_G
+        loss_gate = self.mrbert.get_gate_regularizer_loss(gate) * gate_regularizer_weight if gate is not None else None
+        loss = (loss_ce + loss_gate) if (loss_ce is not None and loss_gate is not None) else (loss_ce if loss_ce is not None else None)
+        return dict(loss=loss, logits=logits, gate=gate, loss_ce=loss_ce, loss_gate=loss_gate)
 
 
 class MrBertForQuestionAnswering(nn.Module):
@@ -401,18 +403,19 @@ class MrBertForQuestionAnswering(nn.Module):
         logits = self.qa_outputs(sequence_output)  # (batch, seq_len, 2)
         start_logits = logits[:, :, 0]
         end_logits = logits[:, :, 1]
-        loss = None
+        loss_ce = None
         if start_positions is not None and end_positions is not None:
             loss_fct = nn.CrossEntropyLoss(ignore_index=-100)
             start_loss = loss_fct(start_logits, start_positions)
             end_loss = loss_fct(end_logits, end_positions)
-            loss = (start_loss + end_loss) / 2
-        gate_loss = self.mrbert.get_gate_regularizer_loss(gate) * gate_regularizer_weight if gate is not None else 0.0
-        if loss is not None and gate_loss != 0:
-            loss = loss + gate_loss
+            loss_ce = (start_loss + end_loss) / 2
+        loss_gate = self.mrbert.get_gate_regularizer_loss(gate) * gate_regularizer_weight if gate is not None else None
+        loss = (loss_ce + loss_gate) if (loss_ce is not None and loss_gate is not None) else (loss_ce if loss_ce is not None else None)
         return dict(
             loss=loss,
             start_logits=start_logits,
             end_logits=end_logits,
             gate=gate,
+            loss_ce=loss_ce,
+            loss_gate=loss_gate,
         )

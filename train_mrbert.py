@@ -202,6 +202,8 @@ def main():
                         help="Append one JSON line with dataset, gate_weight, use_pi, target_deletion, val_acc to this file")
     parser.add_argument("--max_train_samples", type=int, default=None,
                         help="Use only this many training samples (for quick GPU smoke test)")
+    parser.add_argument("--log_level", type=int, default=0, choices=[0, 1, 2, 3],
+                        help="0=none, 1=params+loss_ce/loss_gate, 2=+PI state, 3=+dropped-token summary after val")
     args = parser.parse_args()
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -232,9 +234,20 @@ def main():
             attn_implementation="eager",
         )
     model = model.to(device)
+    if args.log_level >= 1:
+        from mrbert.diagnostics import log_parameter_summary
+        log_parameter_summary(model, label="MrBERT" if (args.gate_weight != 0 or args.use_pi) else "Baseline BERT")
+        if hasattr(model, "mrbert") and hasattr(model.mrbert, "config"):
+            gl = getattr(model.mrbert.config, "gate_layer_index", None)
+            if gl is not None:
+                print(f"[MrBERT] Gate placement: Layer {gl}")
     optimizer = torch.optim.AdamW(model.parameters(), lr=args.lr)
     pi = PIController(target_ratio=args.target_deletion, kp=0.5, ki=1e-5) if args.use_pi else None
     gate_regularizer_weight = args.gate_weight
+
+    # PI failure warnings (log_level >= 2)
+    _pi_warned_alpha_zero = False
+    _pi_warned_500 = False
 
     # Tracking: deletion rate, gate stats, time (baseline has no gate)
     gate_k, threshold_ratio = -30.0, 0.5
@@ -283,8 +296,13 @@ def main():
             optimizer.step()
             epoch_loss += loss.item()
             step += 1
+            pi_state = None
             if pi is not None and out.get("gate") is not None:
-                gate_regularizer_weight = pi.step(out["gate"], gate_k=gate_k)
+                res = pi.step(out["gate"], gate_k=gate_k, return_state=(args.log_level >= 2))
+                if isinstance(res, tuple):
+                    gate_regularizer_weight, pi_state = res
+                else:
+                    gate_regularizer_weight = res
             gate = out.get("gate")
             if gate is not None:
                 with torch.no_grad():
@@ -296,7 +314,28 @@ def main():
             if step == args.phase1_steps and args.phase1_steps > 0:
                 print(f"  Phase A done at step {step}; switching to Phase B (gate_weight={gate_regularizer_weight:.2e})")
             if step % 100 == 0:
-                print(f"  step {step}/{total_steps} loss: {loss.item():.4f}")
+                msg = f"  step {step}/{total_steps} loss: {loss.item():.4f}"
+                if args.log_level >= 1:
+                    lce = out.get("loss_ce")
+                    lg = out.get("loss_gate")
+                    if lce is not None:
+                        msg += f"  L_CE: {lce.item():.4f}"
+                    if lg is not None:
+                        msg += f"  L_G: {lg.item():.4f}"
+                if args.log_level >= 2 and pi_state is not None:
+                    msg += f"  | PI: err={pi_state['error']:.4f} P={pi_state['p']:.4f} I={pi_state['i']:.6f} alpha={pi_state['alpha']:.6f} del%={pi_state['current_ratio']:.2%}"
+                    if pi_state["alpha"] == 0 and not _pi_warned_alpha_zero:
+                        print("  [PI WARNING] alpha=0 — controller may not be driving deletion.")
+                        _pi_warned_alpha_zero = True
+                    if step >= 500 and not _pi_warned_500:
+                        _pi_warned_500 = True
+                        err_abs = abs(pi_state["current_ratio"] - args.target_deletion)
+                        if err_abs > 0.15:
+                            print(
+                                f"  [PI WARNING] After 500 steps deletion rate still far from target: "
+                                f"current={pi_state['current_ratio']:.1%} target={args.target_deletion:.1%}"
+                            )
+                print(msg)
 
         avg_train = epoch_loss / len(train_loader)
         final_avg_train_loss = avg_train
@@ -342,6 +381,33 @@ def main():
     else:
         val_acc = correct / total if total else 0.0
         print(f"Validation accuracy: {val_acc:.4f} ({correct}/{total})")
+
+    if args.log_level >= 3 and hasattr(model, "mrbert") and getattr(model.mrbert, "delete_gate", None) is not None:
+        from mrbert.diagnostics import print_dropped_token_summary
+        first_batch = next(iter(val_loader))
+        inp = {k: v.to(device) if hasattr(v, "to") else v for k, v in first_batch.items()}
+        old_log_shapes = getattr(model.mrbert.config, "log_shapes", False)
+        model.mrbert.config.log_shapes = True
+        with torch.no_grad():
+            out = model(
+                input_ids=inp["input_ids"],
+                attention_mask=inp["attention_mask"],
+                token_type_ids=inp.get("token_type_ids"),
+                gate_regularizer_weight=0.0,
+            )
+        gate = out.get("gate")
+        if gate is not None:
+            thresh = gate_k * threshold_ratio
+            print_dropped_token_summary(
+                tokenizer,
+                first_batch["input_ids"],
+                gate.cpu(),
+                thresh,
+                batch_index=0,
+                max_show=25,
+            )
+        model.mrbert.config.log_shapes = old_log_shapes
+
 
     duration_sec = round(time.time() - start_time, 1)
     actual_del_rate = round(sum_del_rate / n_gate_batches, 4) if n_gate_batches else None
