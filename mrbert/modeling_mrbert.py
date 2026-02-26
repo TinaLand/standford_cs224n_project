@@ -121,9 +121,14 @@ class MrBertModel(BertModel):
         use_soft_deletion: bool,
         return_gate: bool = False,
     ):
+        """Returns (hidden_states, gate, keep_indices, kept_lengths).
+        When use_soft_deletion=True or return_gate=False, keep_indices and kept_lengths are None.
+        When use_soft_deletion=False (hard deletion), keep_indices[b, j] = original token index of j-th kept token in batch b; kept_lengths[b] = number of kept tokens (for QA coordinate re-mapping)."""
         encoder = self.encoder
         gate_layer_index = self.gate_layer_index
         layers = encoder.layer
+        keep_indices_out: torch.Tensor | None = None
+        kept_lengths_out: torch.Tensor | None = None
 
         # Layers 0 .. gate_layer (inclusive)
         for i in range(gate_layer_index + 1):
@@ -159,13 +164,15 @@ class MrBertModel(BertModel):
             max_kept = kept_lengths.max().item()
             if max_kept == 0:
                 max_kept = 1
-            # Build indices: for each batch item, indices of kept positions
+            # Build indices: for each batch item, indices of kept positions (original sequence positions)
             keep_indices = torch.zeros(batch, max_kept, dtype=torch.long, device=device)
             for b in range(batch):
                 idx = torch.where(keep_masks[b])[0]
                 keep_indices[b, : len(idx)] = idx
                 if len(idx) < max_kept:
                     keep_indices[b, len(idx) :] = idx[-1] if len(idx) > 0 else 0
+            keep_indices_out = keep_indices
+            kept_lengths_out = kept_lengths
             # Gather hidden states: (batch, max_kept, hidden_size)
             if getattr(self.mrbert_config, "log_shapes", False):
                 from .diagnostics import log_shape_after_gate
@@ -186,8 +193,8 @@ class MrBertModel(BertModel):
                 hidden_states = layer_outputs[0] if isinstance(layer_outputs, tuple) else layer_outputs
 
         if return_gate:
-            return hidden_states, gate
-        return hidden_states, None
+            return hidden_states, gate, keep_indices_out, kept_lengths_out
+        return hidden_states, None, None, None
 
     def forward(
         self,
@@ -245,7 +252,7 @@ class MrBertModel(BertModel):
             past_key_values_length=0,
         )
 
-        hidden_states, gate = self._encoder_forward_with_gate(
+        hidden_states, gate, keep_indices, kept_lengths = self._encoder_forward_with_gate(
             embedding_output,
             extended_attention_mask,
             head_mask,
@@ -258,7 +265,9 @@ class MrBertModel(BertModel):
         if not return_dict:
             out = (hidden_states, pooled_output)
             if return_gate and gate is not None:
-                return out + (gate,)
+                out = out + (gate,)
+                if keep_indices is not None:
+                    out = out + (keep_indices, kept_lengths)
             return out
 
         outputs = BaseModelOutputWithPoolingAndCrossAttentions(
@@ -269,6 +278,9 @@ class MrBertModel(BertModel):
             attentions=None,
             cross_attentions=None,
         )
+        if keep_indices is not None:
+            outputs.keep_indices = keep_indices
+            outputs.kept_lengths = kept_lengths
         if return_gate and gate is not None:
             return outputs, gate
         return outputs
@@ -399,6 +411,8 @@ class MrBertForQuestionAnswering(nn.Module):
             outputs, gate = result
         else:
             outputs, gate = result, None
+        keep_indices = getattr(outputs, "keep_indices", None)
+        kept_lengths = getattr(outputs, "kept_lengths", None)
         sequence_output = outputs.last_hidden_state if hasattr(outputs, "last_hidden_state") else outputs[0]
         logits = self.qa_outputs(sequence_output)  # (batch, seq_len, 2)
         start_logits = logits[:, :, 0]
@@ -411,7 +425,7 @@ class MrBertForQuestionAnswering(nn.Module):
             loss_ce = (start_loss + end_loss) / 2
         loss_gate = self.mrbert.get_gate_regularizer_loss(gate) * gate_regularizer_weight if gate is not None else None
         loss = (loss_ce + loss_gate) if (loss_ce is not None and loss_gate is not None) else (loss_ce if loss_ce is not None else None)
-        return dict(
+        out = dict(
             loss=loss,
             start_logits=start_logits,
             end_logits=end_logits,
@@ -419,3 +433,7 @@ class MrBertForQuestionAnswering(nn.Module):
             loss_ce=loss_ce,
             loss_gate=loss_gate,
         )
+        if keep_indices is not None:
+            out["keep_indices"] = keep_indices
+            out["kept_lengths"] = kept_lengths
+        return out

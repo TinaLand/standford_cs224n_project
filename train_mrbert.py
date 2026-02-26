@@ -361,8 +361,19 @@ def main():
                     token_type_ids=token_type_ids,
                     gate_regularizer_weight=0.0,
                 )
-                pred_start = out["start_logits"].argmax(dim=1)
-                pred_end = out["end_logits"].argmax(dim=1)
+                pred_start_short = out["start_logits"].argmax(dim=1)
+                pred_end_short = out["end_logits"].argmax(dim=1)
+                keep_indices = out.get("keep_indices")
+                kept_lengths = out.get("kept_lengths")
+                if keep_indices is not None and kept_lengths is not None:
+                    # Hard deletion: logits are over shortened sequence; map predictions to original indices
+                    max_valid = (kept_lengths - 1).clamp(min=0)
+                    pred_start_short = torch.minimum(pred_start_short, max_valid)
+                    pred_end_short = torch.minimum(pred_end_short, max_valid)
+                    pred_start = keep_indices.gather(1, pred_start_short.unsqueeze(1)).squeeze(1)
+                    pred_end = keep_indices.gather(1, pred_end_short.unsqueeze(1)).squeeze(1)
+                else:
+                    pred_start, pred_end = pred_start_short, pred_end_short
                 qa_exact_match += ((pred_start == start_positions) & (pred_end == end_positions)).sum().item()
                 total += start_positions.size(0)
             else:
