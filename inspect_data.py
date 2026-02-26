@@ -1,42 +1,42 @@
 #!/usr/bin/env python3
 """
-查看训练时会用到的数据：来源、任务、标签含义、以及若干条原始样本。
-运行: python inspect_data.py --dataset mrpc
-      python inspect_data.py --dataset imdb
-      python inspect_data.py --dataset sst2
+Inspect data used by training: source, task, label meanings, and a few raw samples.
+Run: python inspect_data.py --dataset mrpc
+     python inspect_data.py --dataset imdb
+     python inspect_data.py --dataset sst2
 """
 import argparse
 from datasets import load_dataset
 
 
-# 各数据集的说明（来源、任务、标签是否正确）
+# Dataset metadata (source, task, labels)
 DATASET_INFO = {
     "mrpc": {
         "name": "GLUE MRPC (Microsoft Research Paraphrase Corpus)",
-        "source": "HuggingFace: glue/mrpc，来自微软研究发布的句子对语料",
-        "task": "句子对语义是否等价（二分类）",
-        "label_0": "不等价 (Not paraphrase)",
-        "label_1": "等价 (Paraphrase)",
+        "source": "HuggingFace: glue/mrpc (Microsoft Research paraphrase corpus)",
+        "task": "Sentence-pair semantic equivalence (binary classification)",
+        "label_0": "Not paraphrase",
+        "label_1": "Paraphrase",
         "columns": ["sentence1", "sentence2", "label"],
         "train_size": 3668,
         "val_size": 408,
     },
     "imdb": {
-        "name": "IMDB 电影评论情感",
-        "source": "HuggingFace: imdb，来自 IMDB 英文影评",
-        "task": "情感二分类（正面/负面）",
-        "label_0": "负面 (Negative)",
-        "label_1": "正面 (Positive)",
+        "name": "IMDB movie review sentiment",
+        "source": "HuggingFace: imdb (IMDB English reviews)",
+        "task": "Sentiment binary classification (positive/negative)",
+        "label_0": "Negative",
+        "label_1": "Positive",
         "columns": ["text", "label"],
         "train_size": 25000,
-        "val_size": 25000,  # 用 test 做 val
+        "val_size": 25000,  # test used as val
     },
     "sst2": {
         "name": "GLUE SST-2 (Stanford Sentiment Treebank)",
-        "source": "HuggingFace: glue/sst2，来自斯坦福情感树库",
-        "task": "单句情感二分类",
-        "label_0": "负面 (Negative)",
-        "label_1": "正面 (Positive)",
+        "source": "HuggingFace: glue/sst2 (Stanford Sentiment Treebank)",
+        "task": "Single-sentence sentiment binary classification",
+        "label_0": "Negative",
+        "label_1": "Positive",
         "columns": ["sentence", "label"],
         "train_size": 67349,
         "val_size": 872,
@@ -45,25 +45,25 @@ DATASET_INFO = {
 
 
 def main():
-    parser = argparse.ArgumentParser(description="查看 train_mrbert.py 会拉取的数据")
+    parser = argparse.ArgumentParser(description="Inspect data that train_mrbert.py will load")
     parser.add_argument("--dataset", type=str, default="mrpc", choices=["mrpc", "imdb", "sst2"])
-    parser.add_argument("--num_samples", type=int, default=5, help="打印前几条样本")
+    parser.add_argument("--num_samples", type=int, default=5, help="Number of samples to print")
     args = parser.parse_args()
 
     info = DATASET_INFO[args.dataset]
     print("=" * 60)
-    print("数据集说明（训练时拉取的数据是否正确的参考）")
+    print("Dataset info (reference for verifying training data)")
     print("=" * 60)
-    print(f"名称: {info['name']}")
-    print(f"来源: {info['source']}")
-    print(f"任务: {info['task']}")
-    print(f"标签 0: {info['label_0']}")
-    print(f"标签 1: {info['label_1']}")
-    print(f"训练集大小: {info['train_size']} 条")
-    print(f"验证集大小: {info['val_size']} 条")
+    print(f"Name: {info['name']}")
+    print(f"Source: {info['source']}")
+    print(f"Task: {info['task']}")
+    print(f"Label 0: {info['label_0']}")
+    print(f"Label 1: {info['label_1']}")
+    print(f"Train size: {info['train_size']} examples")
+    print(f"Validation size: {info['val_size']} examples")
     print()
 
-    print("正在从 HuggingFace 拉取数据（首次会下载）...")
+    print("Loading from HuggingFace (downloads on first run)...")
     if args.dataset == "mrpc":
         ds = load_dataset("glue", "mrpc", trust_remote_code=True)
     elif args.dataset == "imdb":
@@ -72,14 +72,14 @@ def main():
         ds = load_dataset("glue", "sst2", trust_remote_code=True)
 
     train = ds["train"]
-    print(f"实际拉取到的 train 条数: {len(train)}")
+    print(f"Actual train size loaded: {len(train)}")
     print()
-    print(f"前 {args.num_samples} 条原始样本（你可据此判断数据是否正确）：")
+    print(f"First {args.num_samples} raw samples (use these to verify data):")
     print("-" * 60)
 
     for i in range(min(args.num_samples, len(train))):
         row = train[i]
-        print(f"样本 {i+1}:")
+        print(f"Sample {i+1}:")
         if "sentence1" in row:
             print(f"  sentence1: {row['sentence1'][:80]}...")
             print(f"  sentence2: {row['sentence2'][:80]}...")
@@ -87,11 +87,12 @@ def main():
             print(f"  sentence: {row['sentence'][:120]}...")
         elif "text" in row:
             print(f"  text: {row['text'][:120]}...")
-        print(f"  label: {row['label']} ({info['label_' + str(row['label'])]})")
+        lbl = row["label"]
+        print(f"  label: {lbl} ({info['label_' + str(lbl)]})")
         print()
 
     print("=" * 60)
-    print("结论: 上面即 train_mrbert.py 使用的数据。若来源和样本符合预期，即表示拉取正确。")
+    print("Conclusion: The above is the data used by train_mrbert.py. If source and samples look correct, the data is loaded correctly.")
     print("=" * 60)
 
 

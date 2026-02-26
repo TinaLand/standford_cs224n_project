@@ -53,35 +53,64 @@ Until the quota is increased, **no zone will work** for GPU VMs. Alternatives:
 
 ---
 
-## Step 3: Create a GPU VM
+## Step 3: Create a GPU instance
 
-GCP gives you a **VM with 1 NVIDIA T4 GPU** (after GPU quota is approved). Run this in Terminal (one block).
+Choose one of two options: **Vertex AI Workbench (Console, recommended)** or **gcloud CLI**.
 
-**If you see `ZONE_RESOURCE_POOL_EXHAUSTED`** (no capacity in that zone), change `ZONE` to another zone and run again. Try in this order:
+---
+
+### Option A: Vertex AI Workbench (Console, recommended)
+
+1. In Google Cloud Console, use the **top search bar** to open **"Vertex AI Workbench"**.
+2. Open the **Instances** tab and click **Create New**.
+3. Configure as follows (**use region us-east1** to match quota):
+   - **Region**: **us-east1** (if your GPU quota is there).
+   - **Environment**: **PyTorch 2.x** (CS224N uses PyTorch).
+   - **Machine type**: **n1-standard-4** (or similar).
+   - **GPU type**: **NVIDIA T4**.
+   - **GPU count**: **1**.
+4. Click **Create** at the bottom and wait for the instance to be ready (about 1–2 minutes).
+
+When ready, click **Open JupyterLab** in the instance list, then open **Terminal** in Jupyter. Upload or clone the project, then run `pip install -r requirements.txt` and `./run_experiments.sh` (or `QUICK=1 ./run_experiments.sh`).
+
+---
+
+### Option B: Create GPU VM with gcloud
+
+Run the following on your **local Terminal** (GPU quota must be enabled):
+
+**If you get `ZONE_RESOURCE_POOL_EXHAUSTED`**, try another zone (e.g. `us-east1-c`, `us-west1-b`):
 
 ```bash
 export PROJECT_ID=$(gcloud config get-value project)
-# Try these zones in order until one works (T4 is often busy in us-central1):
-export ZONE=us-west1-b
-# If that fails, try: us-east1-c, europe-west1-b, asia-east1-a
+# Prefer us-east1 zone if your quota is there:
+export ZONE=us-east1-c
+# If that fails, try: us-east1-b, us-west1-b, europe-west1-b
 
 gcloud compute instances create mrbert-gpu \
-  --zone=$ZONE \
+  --zone=us-east1-c \
   --machine-type=n1-standard-4 \
   --accelerator=type=nvidia-tesla-t4,count=1 \
-  --image-family=common-cu128-ubuntu-2204-nvidia-570 \
+  --image-family=pytorch-2-7-cu128-ubuntu-2204-nvidia-570 \
   --image-project=deeplearning-platform-release \
   --maintenance-policy=TERMINATE \
-  --boot-disk-size=50GB
+  --boot-disk-size=100GB \
+  --metadata="install-nvidia-driver=True"
 ```
 
-- **GPU**: `nvidia-tesla-t4` (1 GPU).
-- **Image**: `common-cu128-ubuntu-2204-nvidia-570` = Deep Learning VM with CUDA 12.8, Ubuntu 22.04.
-- **Zone**: Use `us-west1-b` first; if you get “resource exhausted”, try `us-east1-c`, then `europe-west1-b`, then `asia-east1-a`. Remember the zone you used — you need it for `scp`, `ssh`, and `delete` (Steps 4, 5, 8).
+# Set ZONE to the zone where the VM was created
+export ZONE=us-east1-d
+gcloud compute scp --recurse . mrbert-gpu:~/cs224n_project --zone=$ZONE
 
-Wait until it says the instance is created (1–2 minutes).
+- **GPU**: 1× `nvidia-tesla-t4`.
+- **Image**: Deep Learning VM, CUDA 12.8, Ubuntu 22.04.
+- **Note the ZONE** — you need it for `scp`, `ssh`, and delete (Steps 4, 5, 8).
 
-**CPU-only VM (no GPU quota needed):** If you cannot get GPU quota, create a normal VM and run the same code on CPU (slower):
+---
+
+### CPU-only VM (when you have no GPU quota)
+
+If you don't have GPU quota yet, create a VM **without** GPU and run on CPU (slower):
 
 ```bash
 export ZONE=us-central1-a
@@ -93,13 +122,15 @@ gcloud compute instances create mrbert-gpu \
   --boot-disk-size=50GB
 ```
 
-Then on the VM: `sudo apt-get update && sudo apt-get install -y python3-pip`, upload project, `pip install -r requirements.txt`, run `./run_gpu_small.sh` (it will show `Device: cpu`).
+After logging into the VM: `sudo apt-get update && sudo apt-get install -y python3-pip`, upload the project, `pip install -r requirements.txt`, then run `./run_experiments.sh` (you will see `Device: cpu`).
 
 ---
 
 ## Step 4: Upload your project to the VM
 
-From your **Mac** (same Terminal, in your project folder). Use the **same ZONE** you used in Step 3 (e.g. `us-west1-b`):
+**If using Vertex AI Workbench**: Use the JupyterLab file browser to upload files or `git clone`; no need to scp from your machine. Then go to the project directory in the instance Terminal and run Step 6.
+
+**If using a gcloud-created VM**: On your **Mac Terminal** (in the project directory), run the commands below. Set `ZONE` to the zone used in Step 3 (e.g. `us-east1-c`):
 
 ```bash
 cd /Users/tianhuihuang/Desktop/cs224n_project
@@ -138,8 +169,8 @@ pip install --upgrade pip
 pip install -r requirements.txt
 
 # Quick GPU run: 200 MRPC samples, 1 epoch + latency benchmark
-chmod +x run_gpu_small.sh
-./run_gpu_small.sh
+chmod +x run_experiments.sh
+QUICK=1 ./run_experiments.sh
 ```
 
 You should see:
@@ -185,7 +216,7 @@ Type `y` when it asks for confirmation.
 | 3    | Mac     | Create VM with the long `gcloud compute instances create ...` block above |
 | 4    | Mac     | `gcloud compute scp --recurse . mrbert-gpu:~/cs224n_project --zone=$ZONE` |
 | 5    | Mac     | `gcloud compute ssh mrbert-gpu --zone=$ZONE` |
-| 6    | **VM**  | `cd ~/cs224n_project`, `source .venv/bin/activate`, `pip install -r requirements.txt`, `./run_gpu_small.sh` |
+| 6    | **VM**  | `cd ~/cs224n_project`, `source .venv/bin/activate`, `pip install -r requirements.txt`, `QUICK=1 ./run_experiments.sh` |
 | 7    | Mac     | (Optional) `gcloud compute scp mrbert-gpu:~/cs224n_project/results/...` |
 | 8    | Mac     | `gcloud compute instances delete mrbert-gpu --zone=$ZONE` |
 
