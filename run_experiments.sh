@@ -80,10 +80,10 @@ python3 scripts/aggregate_results.py || echo "aggregate_results failed"
 
 echo "=== 12. Extracting high-deletion error cases (SNLI / TyDi QA) ==="
 if [ "${SKIP_SNLI:-0}" != "1" ]; then
-  python3 scripts/extract_error_cases.py --dataset snli --max_samples 5000 --output results/error_cases_snli.jsonl || echo "extract_error_cases (SNLI) failed"
+  python3 -m scripts.extract_error_cases --dataset snli --max_samples 5000 --output results/error_cases_snli.jsonl || echo "extract_error_cases (SNLI) failed"
 fi
 if [ "${SKIP_TYDIQA:-0}" != "1" ]; then
-  python3 scripts/extract_error_cases.py --dataset tydiqa --max_samples 1000 --output results/error_cases_tydiqa.jsonl || echo "extract_error_cases (TyDi QA) failed"
+  python3 -m scripts.extract_error_cases --dataset tydiqa --max_samples 1000 --output results/error_cases_tydiqa.jsonl || echo "extract_error_cases (TyDi QA) failed"
 fi
 
 echo "=== Done. Results in $RESULTS_FILE; error cases in results/error_cases_*.jsonl ==="
