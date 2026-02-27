@@ -211,7 +211,9 @@ def main():
 
     # If verbose logging is requested, tee stdout/stderr to a log file.
     if args.log_level > 0:
-        logs_dir = Path(__file__).resolve().parent / "logs"
+        # Import locally to avoid any issues with shadowed names on older copies.
+        from pathlib import Path as _Path
+        logs_dir = _Path(__file__).resolve().parent / "logs"
         logs_dir.mkdir(exist_ok=True)
         ts = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
         log_path = logs_dir / f"train_{args.dataset}_log{args.log_level}_{ts}.txt"
@@ -238,6 +240,16 @@ def main():
                         s.flush()
                     except Exception:
                         pass
+
+            def isatty(self):
+                # Delegate TTY detection to the first underlying stream (typically the real stdout/stderr).
+                if not self._streams:
+                    return False
+                s = self._streams[0]
+                try:
+                    return s.isatty()
+                except Exception:
+                    return False
 
         log_fh = log_path.open("w", buffering=1, encoding="utf-8")
         sys.stdout = _Tee(sys.stdout, log_fh)
