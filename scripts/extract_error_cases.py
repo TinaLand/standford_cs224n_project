@@ -177,15 +177,36 @@ def main():
             if is_qa:
                 start_pos = batch["start_positions"].to(device)
                 end_pos = batch["end_positions"].to(device)
-                out = model(input_ids=input_ids, attention_mask=attention_mask, token_type_ids=token_type_ids, gate_regularizer_weight=0.0)
+                out = model(
+                    input_ids=input_ids,
+                    attention_mask=attention_mask,
+                    token_type_ids=token_type_ids,
+                    gate_regularizer_weight=0.0,
+                )
                 logits_s = out["start_logits"]
                 logits_e = out["end_logits"]
-                pred_start = logits_s.argmax(dim=1)
-                pred_end = logits_e.argmax(dim=1)
+                # Map predictions from shortened sequence back to original indices if hard deletion was used
+                pred_start_short = logits_s.argmax(dim=1)
+                pred_end_short = logits_e.argmax(dim=1)
+                keep_indices = out.get("keep_indices")
+                kept_lengths = out.get("kept_lengths")
+                if keep_indices is not None and kept_lengths is not None:
+                    max_valid = (kept_lengths - 1).clamp(min=0)
+                    pred_start_short = torch.minimum(pred_start_short, max_valid)
+                    pred_end_short = torch.minimum(pred_end_short, max_valid)
+                    pred_start = keep_indices.gather(1, pred_start_short.unsqueeze(1)).squeeze(1)
+                    pred_end = keep_indices.gather(1, pred_end_short.unsqueeze(1)).squeeze(1)
+                else:
+                    pred_start, pred_end = pred_start_short, pred_end_short
                 correct = (pred_start == start_pos) & (pred_end == end_pos)
             else:
                 labels = batch["label"].to(device)
-                out = model(input_ids=input_ids, attention_mask=attention_mask, labels=labels, gate_regularizer_weight=0.0)
+                out = model(
+                    input_ids=input_ids,
+                    attention_mask=attention_mask,
+                    labels=labels,
+                    gate_regularizer_weight=0.0,
+                )
                 preds = out["logits"].argmax(dim=1)
                 correct = preds == labels
             gate = out.get("gate")

@@ -7,6 +7,9 @@ Phase B = task finetuning (same loss, typically lower gate_weight).
 """
 import argparse
 import time
+import sys
+import datetime
+from pathlib import Path
 import torch
 from torch.utils.data import DataLoader
 from transformers import BertTokenizer
@@ -205,6 +208,41 @@ def main():
     parser.add_argument("--log_level", type=int, default=0, choices=[0, 1, 2, 3],
                         help="0=none, 1=params+loss_ce/loss_gate, 2=+PI state, 3=+dropped-token summary after val")
     args = parser.parse_args()
+
+    # If verbose logging is requested, tee stdout/stderr to a log file.
+    if args.log_level > 0:
+        logs_dir = Path(__file__).resolve().parent / "logs"
+        logs_dir.mkdir(exist_ok=True)
+        ts = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+        log_path = logs_dir / f"train_{args.dataset}_log{args.log_level}_{ts}.txt"
+
+        class _Tee:
+            def __init__(self, *streams):
+                self._streams = streams
+
+            def write(self, data):
+                for s in self._streams:
+                    try:
+                        s.write(data)
+                    except Exception:
+                        pass
+                for s in self._streams:
+                    try:
+                        s.flush()
+                    except Exception:
+                        pass
+
+            def flush(self):
+                for s in self._streams:
+                    try:
+                        s.flush()
+                    except Exception:
+                        pass
+
+        log_fh = log_path.open("w", buffering=1, encoding="utf-8")
+        sys.stdout = _Tee(sys.stdout, log_fh)
+        sys.stderr = _Tee(sys.stderr, log_fh)
+        print(f"[LOG] Writing detailed logs to {log_path}")
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     print(f"Device: {device}")
