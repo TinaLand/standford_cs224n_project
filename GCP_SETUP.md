@@ -102,6 +102,10 @@ gcloud compute instances create mrbert-gpu \
 export ZONE=us-east1-d
 gcloud compute scp --recurse . mrbert-gpu:~/cs224n_project --zone=$ZONE
 
+gcloud compute instances stop mrbert-gpu --zone=us-east1-d
+gcloud compute ssh mrbert-gpu --zone=us-east1-d
+gcloud compute instances start mrbert-gpu --zone=us-east1-d
+
 - **GPU**: 1× `nvidia-tesla-t4`.
 - **Image**: Deep Learning VM, CUDA 12.8, Ubuntu 22.04.
 - **Note the ZONE** — you need it for `scp`, `ssh`, and delete (Steps 4, 5, 8).
