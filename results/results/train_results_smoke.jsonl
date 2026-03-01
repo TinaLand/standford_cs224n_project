@@ -1,0 +1,1 @@
+{"dataset": "tydiqa", "gate_weight": 0.0001, "use_pi": true, "target_deletion": 0.5, "val_acc": 0.0015, "avg_train_loss": 5.2873, "actual_deletion_rate": 0.6295, "gate_mean": -16.5045, "gate_std": 3.7211, "alpha_final": 0.0, "duration_sec": 41.7, "epochs": 1, "batch_size": 8}
