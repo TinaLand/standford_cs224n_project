@@ -7,16 +7,24 @@
 #   SKIP_SST2=1 ./run_experiments.sh  # skip SST-2
 #   SKIP_TYDIQA=1 ./run_experiments.sh  # skip TyDi QA (saves time)
 #   EPOCHS=3 BATCH=16 ./run_experiments.sh  # custom epochs/batch
+#   LOG_LEVEL=1 ./run_experiments.sh        # write logs for every run (1=minimal, 2=+PI, 3=+gate details)
 
 # sample command
 #   MR_TARGET_DEL=0.4 MR_USE_PI=1 EPOCHS=3 BATCH=8 ./run_experiments.sh
 set -e
 cd "$(dirname "$0")"
 mkdir -p results
+mkdir -p logs
 RESULTS_FILE="results/train_results.jsonl"
 
 EPOCHS=${EPOCHS:-1}
 BATCH=${BATCH:-8}
+LOG_LEVEL=${LOG_LEVEL:-0}
+if [ "$LOG_LEVEL" != "0" ]; then
+  LOG_ARGS=(--log_level "$LOG_LEVEL")
+else
+  LOG_ARGS=()
+fi
 
 # MrBERT deletion settings (can be overridden via env):
 #   MR_TARGET_DEL: target_deletion for PI controller (default 0.5)
@@ -34,7 +42,7 @@ if [ "${QUICK:-0}" = "1" ]; then
   python3 -c "import torch; print('CUDA:', torch.cuda.get_device_name(0) if torch.cuda.is_available() else 'No GPU')"
   echo ""
   python3 train_mrbert.py --dataset mrpc --epochs 1 --batch_size 8 --max_train_samples 200 \
-    --gate_weight 1e-4 "${MR_PI_ARGS[@]}" --output_result "$RESULTS_FILE"
+    --gate_weight 1e-4 "${MR_PI_ARGS[@]}" "${LOG_ARGS[@]}" --output_result "$RESULTS_FILE"
   python3 latency_benchmark.py --batch_size 16 --seq_length 256 --steps 20 --output_result results/latency_results.json
   echo "=== Aggregating results into RESULTS.md ==="
   python3 scripts/aggregate_results.py || echo "aggregate_results failed (QUICK mode)"
@@ -43,36 +51,36 @@ if [ "${QUICK:-0}" = "1" ]; then
 fi
 
 echo "=== 1. Baseline BERT: MRPC ==="
-python3 train_mrbert.py --dataset mrpc --epochs "$EPOCHS" --batch_size "$BATCH" --gate_weight 0.0 --output_result "$RESULTS_FILE"
+python3 train_mrbert.py --dataset mrpc --epochs "$EPOCHS" --batch_size "$BATCH" --gate_weight 0.0 "${LOG_ARGS[@]}" --output_result "$RESULTS_FILE"
 
 echo "=== 2. Baseline BERT: IMDB ==="
-python3 train_mrbert.py --dataset imdb --epochs "$EPOCHS" --batch_size "$BATCH" --gate_weight 0.0 --output_result "$RESULTS_FILE"
+python3 train_mrbert.py --dataset imdb --epochs "$EPOCHS" --batch_size "$BATCH" --gate_weight 0.0 "${LOG_ARGS[@]}" --output_result "$RESULTS_FILE"
 
 echo "=== 3. MrBERT (~50% deletion): MRPC ==="
-python3 train_mrbert.py --dataset mrpc --epochs "$EPOCHS" --batch_size "$BATCH" --gate_weight 1e-4 "${MR_PI_ARGS[@]}" --output_result "$RESULTS_FILE"
+python3 train_mrbert.py --dataset mrpc --epochs "$EPOCHS" --batch_size "$BATCH" --gate_weight 1e-4 "${MR_PI_ARGS[@]}" "${LOG_ARGS[@]}" --output_result "$RESULTS_FILE"
 
 echo "=== 4. MrBERT (~50% deletion): IMDB ==="
-python3 train_mrbert.py --dataset imdb --epochs "$EPOCHS" --batch_size "$BATCH" --gate_weight 1e-4 "${MR_PI_ARGS[@]}" --output_result "$RESULTS_FILE"
+python3 train_mrbert.py --dataset imdb --epochs "$EPOCHS" --batch_size "$BATCH" --gate_weight 1e-4 "${MR_PI_ARGS[@]}" "${LOG_ARGS[@]}" --output_result "$RESULTS_FILE"
 
 if [ "${SKIP_SNLI:-0}" != "1" ]; then
   echo "=== 5. Baseline BERT: SNLI ==="
-  python3 train_mrbert.py --dataset snli --epochs "$EPOCHS" --batch_size "$BATCH" --gate_weight 0.0 --output_result "$RESULTS_FILE"
+  python3 train_mrbert.py --dataset snli --epochs "$EPOCHS" --batch_size "$BATCH" --gate_weight 0.0 "${LOG_ARGS[@]}" --output_result "$RESULTS_FILE"
   echo "=== 6. MrBERT: SNLI ==="
-  python3 train_mrbert.py --dataset snli --epochs "$EPOCHS" --batch_size "$BATCH" --gate_weight 1e-4 "${MR_PI_ARGS[@]}" --output_result "$RESULTS_FILE"
+  python3 train_mrbert.py --dataset snli --epochs "$EPOCHS" --batch_size "$BATCH" --gate_weight 1e-4 "${MR_PI_ARGS[@]}" "${LOG_ARGS[@]}" --output_result "$RESULTS_FILE"
 fi
 
 if [ "${SKIP_SST2:-0}" != "1" ]; then
   echo "=== 7. Baseline BERT: SST-2 ==="
-  python3 train_mrbert.py --dataset sst2 --epochs "$EPOCHS" --batch_size "$BATCH" --gate_weight 0.0 --output_result "$RESULTS_FILE"
+  python3 train_mrbert.py --dataset sst2 --epochs "$EPOCHS" --batch_size "$BATCH" --gate_weight 0.0 "${LOG_ARGS[@]}" --output_result "$RESULTS_FILE"
   echo "=== 8. MrBERT: SST-2 ==="
-  python3 train_mrbert.py --dataset sst2 --epochs "$EPOCHS" --batch_size "$BATCH" --gate_weight 1e-4 "${MR_PI_ARGS[@]}" --output_result "$RESULTS_FILE"
+  python3 train_mrbert.py --dataset sst2 --epochs "$EPOCHS" --batch_size "$BATCH" --gate_weight 1e-4 "${MR_PI_ARGS[@]}" "${LOG_ARGS[@]}" --output_result "$RESULTS_FILE"
 fi
 
 if [ "${SKIP_TYDIQA:-0}" != "1" ]; then
   echo "=== 9. Baseline BERT: TyDi QA ==="
-  python3 train_mrbert.py --dataset tydiqa --epochs "$EPOCHS" --batch_size "$BATCH" --max_length 256 --gate_weight 0.0 --output_result "$RESULTS_FILE"
+  python3 train_mrbert.py --dataset tydiqa --epochs "$EPOCHS" --batch_size "$BATCH" --max_length 256 --gate_weight 0.0 "${LOG_ARGS[@]}" --output_result "$RESULTS_FILE"
   echo "=== 10. MrBERT: TyDi QA ==="
-  python3 train_mrbert.py --dataset tydiqa --epochs "$EPOCHS" --batch_size "$BATCH" --max_length 256 --gate_weight 1e-4 "${MR_PI_ARGS[@]}" --output_result "$RESULTS_FILE"
+  python3 train_mrbert.py --dataset tydiqa --epochs "$EPOCHS" --batch_size "$BATCH" --max_length 256 --gate_weight 1e-4 "${MR_PI_ARGS[@]}" "${LOG_ARGS[@]}" --output_result "$RESULTS_FILE"
 fi
 
 echo "=== 11. Aggregating results into RESULTS.md ==="
