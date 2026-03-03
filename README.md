@@ -207,20 +207,29 @@ For a written or oral report, you can structure the implementation as follows:
 
 ---
 
+## Results and analysis
+
+See **[RESULTS_ANALYSIS.md](RESULTS_ANALYSIS.md)** for result tables (MrBERT 3-epoch runs), takeaways, and notes on MrRoBERTa / MrXLM preliminary runs.
+
+---
+
 ## Project Structure
 
 | Path | Role |
 |------|------|
 | `mrbert/configuration_mrbert.py` | `MrBertConfig`: extends `BertConfig` with `gate_layer_index`, `gate_k`, `gate_threshold_ratio`, `use_softmax1`. |
 | `mrbert/modeling_mrbert.py` | `DeleteGate`, `MrBertModel` (soft/hard deletion in encoder), `MrBertForSequenceClassification`; gate regularizer and optional gate return. |
+| `mrbert/modeling_mrroberta.py` | `MrRobertaModel`: RoBERTa with same gate and index contract; for architecture / CPU demo. |
+| `mrbert/modeling_mrxlm.py` | `MrXLMRobertaModel`: XLM-RoBERTa with same gate and index contract; for cross-lingual / CPU demo. |
 | `mrbert/pi_controller.py` | PI controller for target deletion ratio (paper Eq. (4)–(6)). |
 | `run_mrbert_example.py` | Minimal demo: 2 sentences, 3 steps, no real dataset. |
-| `train_mrbert.py` | Training on HuggingFace datasets (mrpc / imdb / sst2 / snli). |
-| `run_experiments.sh` | Run baseline + MrBERT on MRPC, IMDB, SNLI; append results to `results/train_results.jsonl`. |
+| `train_mrbert.py` | Training on HuggingFace datasets (mrpc / imdb / sst2 / snli / tydiqa). |
+| `run_experiments.sh` | Run baseline + MrBERT on MRPC, IMDB, SNLI, SST-2, TyDi QA; append results to `results/train_results.jsonl`. |
 | `scripts/aggregate_results.py` | Read JSONL and update `RESULTS.md` comparison table. |
 | `gate_interpretability.py` | Per-token gate scores and deletion-by-token-type stats. |
 | `inspect_data.py` | Print dataset description and sample rows. |
 | `RESULTS.md` | Accuracy and latency comparison table (filled by aggregate_results.py). |
+| `RESULTS_ANALYSIS.md` | Result tables, takeaways, and analysis for MrBERT and MrRoBERTa/MrXLM. |
 | `DATA_README.md` | Data source and label meaning for mrpc / imdb / sst2. |
 | `dynamic_token.pdf` | MrT5 paper (ICLR 2025). |
 
