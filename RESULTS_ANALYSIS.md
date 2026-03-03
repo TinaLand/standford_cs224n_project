@@ -1,12 +1,12 @@
 # Results and Analysis
 
-This file summarizes experimental results and analysis for MrBERT and the extended backbones (MrRoBERTa, MrXLM). Raw numbers come from `results/results/train_results.jsonl` and from CPU sanity checks.
+This file summarizes experimental results and analysis for MrBERT and the extended backbones (MrRoBERTa, MrXLM). Raw numbers come from the 3-epoch run stored under `results/MR_TARGET_DEL=0.5 MR_USE_PI=1EPOCHS=3BATCH=8LOG_LEVEL=1_with_deletion_map/train_results.jsonl` (also mirrored into `results/results/train_results.jsonl`) and from CPU sanity checks.
 
 ---
 
 ## MrBERT (BERT backbone) — full experiments
 
-Results are from `results/results/train_results.jsonl` for the **3-epoch** full run: baseline BERT vs MrBERT with PI controller, target deletion 0.5, batch size 8.
+Results are from the **3-epoch** full run with `MR_TARGET_DEL=0.5`, `MR_USE_PI=1`, `EPOCHS=3`, `BATCH=8`, `LOG_LEVEL=1`, stored under `results/MR_TARGET_DEL=0.5 MR_USE_PI=1EPOCHS=3BATCH=8LOG_LEVEL=1_with_deletion_map/train_results.jsonl`: baseline BERT vs MrBERT with PI controller, target deletion 0.5, batch size 8.
 
 | Dataset | Baseline (val acc) | MrBERT (val acc) | MrBERT actual deletion | Note |
 |---------|--------------------|------------------|------------------------|------|
@@ -19,6 +19,7 @@ Results are from `results/results/train_results.jsonl` for the **3-epoch** full 
 **Takeaways**
 
 - On classification (MRPC, SNLI, SST-2), MrBERT matches or beats baseline at 55–72% token deletion.
+- Dataset-wise deletion from this run: MRPC ≈ 65%, IMDB ≈ 60%, SNLI ≈ 55%, SST-2 ≈ 72%, TyDi QA ≈ 100%, while all corresponding baselines stay near 0–3% deletion (as expected with the gate disabled).
 - TyDi QA under current settings over-deletes (99.8%); the same `keep_indices` / `kept_lengths` re-mapping used for EM is in place and validated on smoke runs. Further work: lower target deletion or QA-specific tuning.
 
 ---
@@ -44,9 +45,9 @@ So far these are **sanity checks** only: no full training or evaluation. They su
 
 ---
 
-## TyDi QA error cases (results/results/error_cases_tydiqa.jsonl)
+## TyDi QA error cases (error_cases_tydiqa.jsonl)
 
-`results/results/error_cases_tydiqa.jsonl` contains **50** TyDi QA examples where:
+We log TyDi QA error cases for this run into JSONL files such as `results/results/error_cases_tydiqa.jsonl` and `results/MR_TARGET_DEL=0.5 MR_USE_PI=1EPOCHS=3BATCH=8LOG_LEVEL=1_with_deletion_map/error_cases_tydiqa.jsonl`. Each file contains **50** TyDi QA examples where:
 
 - The model’s predicted span (after coordinate re-mapping using `keep_indices` / `kept_lengths`) does **not** match the gold span.
 - The **token deletion rate is very high**, typically in the range **0.70–0.90**.
@@ -73,6 +74,18 @@ For quick sanity, we also ran a **TyDi QA smoke test** (`results/results/train_r
 
 - `val_acc` (EM): ~0.0015 (6/3984), `actual_deletion_rate` ≈ 0.63, `alpha_final = 0.0`.
 - This shows that even with very limited training, the gate already learns to delete aggressively; the full-run error cases are the “extreme” version of the same behavior.
+
+---
+
+## SNLI error cases vs high deletion (results/.../error_cases_snli.jsonl)
+
+For SNLI we similarly sample **50** “wrong + high-deletion” examples into `results/MR_TARGET_DEL=0.5 MR_USE_PI=1EPOCHS=3BATCH=8LOG_LEVEL=1_with_deletion_map/error_cases_snli.jsonl`:
+
+- All selected examples have **deletion_rate ≥ 0.90**, meaning the gate removes almost the entire premise + hypothesis sequence.
+- In many of these, core content words from the premise or hypothesis (e.g., “two women are embracing…”, “two young boys play football…”) appear in `dropped_tokens`, so the classifier is forced to decide from a very small, distorted fragment of the input.
+- Qualitatively, these cases explain part of the residual SNLI error even though the **average** SNLI accuracy improves: the model is generally competitive, but on a small slice of inputs it becomes too aggressive and drops too much semantic content.
+
+This supports a nuanced claim: on SNLI, MrBERT with PI achieves a strong overall gain, but there is a long tail of failures that coincide with near-total deletion; tuning the target deletion or adding simple safeguards (e.g., caps on per-example deletion) could further improve robustness.
 
 ---
 
