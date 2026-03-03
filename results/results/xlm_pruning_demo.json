@@ -1,0 +1,12 @@
+{
+  "script": "scripts/xlm_pruning_demo.py",
+  "model": "xlm-roberta-base",
+  "description": "CPU sanity check for MrXLMRobertaModel with hard deletion and gate metadata.",
+  "input_shape": [2, 32],
+  "last_hidden_state_shape": [2, 5, 768],
+  "kept_lengths": [3, 5],
+  "keep_indices_shape": [2, 5],
+  "gate_shape": [2, 32],
+  "estimated_deletion_rate": 0.75
+}
+
