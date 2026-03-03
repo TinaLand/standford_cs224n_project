@@ -87,6 +87,7 @@ export PROJECT_ID=$(gcloud config get-value project)
 export ZONE=us-east1-c
 # If that fails, try: us-east1-b, us-west1-b, europe-west1-b
 
+T4 GPU 
 gcloud compute instances create mrbert-gpu \
   --zone=us-east1-c \
   --machine-type=n1-standard-4 \
@@ -96,6 +97,16 @@ gcloud compute instances create mrbert-gpu \
   --maintenance-policy=TERMINATE \
   --boot-disk-size=100GB \
   --metadata="install-nvidia-driver=True"
+
+L4 GPU
+gcloud compute instances create mrbert-l4-fast \
+    --project=cs224n-ah \
+    --zone=asia-east1-a \
+    --machine-type=g2-standard-4 \
+    --accelerator=count=1,type=nvidia-l4 \
+    --image-family=pytorch-latest-gpu \
+    --image-project=deeplearning-platform-release \
+    --boot-disk-size=100GB
 ```
 
 # Set ZONE to the zone where the VM was created
