@@ -207,6 +207,9 @@ def main():
                         help="Use only this many training samples (for quick GPU smoke test)")
     parser.add_argument("--log_level", type=int, default=0, choices=[0, 1, 2, 3],
                         help="0=none, 1=params+loss_ce/loss_gate, 2=+PI state, 3=+dropped-token summary after val")
+    parser.add_argument("--use_wandb", action="store_true", help="Log metrics to Weights & Biases (wandb)")
+    parser.add_argument("--wandb_project", type=str, default="mrbert", help="WandB project name")
+    parser.add_argument("--wandb_run_name", type=str, default=None, help="WandB run name (default: dataset + model type)")
     args = parser.parse_args()
 
     # If verbose logging is requested, tee stdout/stderr to a log file.
@@ -258,6 +261,15 @@ def main():
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     print(f"Device: {device}")
+
+    use_wandb = False
+    if args.use_wandb:
+        try:
+            import wandb
+            use_wandb = True
+        except ImportError:
+            print("Warning: wandb not installed; run pip install wandb to enable logging.")
+
     print(f"Loading dataset: {args.dataset}")
 
     train_ds, val_ds, tokenizer, num_labels, task_type = get_dataset_and_tokenizer(args.dataset, args.max_length)
@@ -294,6 +306,24 @@ def main():
     optimizer = torch.optim.AdamW(model.parameters(), lr=args.lr)
     pi = PIController(target_ratio=args.target_deletion, kp=0.5, ki=1e-5) if args.use_pi else None
     gate_regularizer_weight = args.gate_weight
+
+    if use_wandb:
+        wandb.init(
+            project=args.wandb_project,
+            config={
+                "dataset": args.dataset,
+                "epochs": args.epochs,
+                "batch_size": args.batch_size,
+                "lr": args.lr,
+                "gate_weight": args.gate_weight,
+                "use_pi": args.use_pi,
+                "target_deletion": args.target_deletion,
+                "max_length": args.max_length,
+                "task_type": task_type,
+                "max_train_samples": args.max_train_samples,
+            },
+            name=args.wandb_run_name or f"{args.dataset}_{'mrbert' if (args.gate_weight != 0 or args.use_pi) else 'baseline'}",
+        )
 
     # PI failure warnings (log_level >= 2)
     _pi_warned_alpha_zero = False
@@ -364,6 +394,19 @@ def main():
             if step == args.phase1_steps and args.phase1_steps > 0:
                 print(f"  Phase A done at step {step}; switching to Phase B (gate_weight={gate_regularizer_weight:.2e})")
             if step % 100 == 0:
+                if use_wandb:
+                    log_dict = {"train/loss": loss.item(), "step": step}
+                    if out.get("loss_ce") is not None:
+                        log_dict["train/loss_ce"] = out["loss_ce"].item()
+                    if out.get("loss_gate") is not None:
+                        log_dict["train/loss_gate"] = out["loss_gate"].item()
+                    if gate is not None:
+                        log_dict["train/deletion_rate"] = (gate < threshold).float().mean().item()
+                        log_dict["train/gate_mean"] = gate.mean().item()
+                    if pi_state is not None:
+                        log_dict["train/pi_alpha"] = pi_state.get("alpha", gate_regularizer_weight)
+                        log_dict["train/pi_deletion_ratio"] = pi_state.get("current_ratio", 0)
+                    wandb.log(log_dict, step=step)
                 msg = f"  step {step}/{total_steps} loss: {loss.item():.4f}"
                 if args.log_level >= 1:
                     lce = out.get("loss_ce")
@@ -389,6 +432,8 @@ def main():
 
         avg_train = epoch_loss / len(train_loader)
         final_avg_train_loss = avg_train
+        if use_wandb:
+            wandb.log({"train/epoch_loss": avg_train, "epoch": epoch + 1}, step=step)
         print(f"Epoch {epoch + 1}/{args.epochs} avg train loss: {avg_train:.4f}")
 
     # Validation
@@ -477,6 +522,19 @@ def main():
     alpha_final = round(gate_regularizer_weight, 6) if (pi is not None and n_gate_batches) else None
     if n_gate_batches:
         print(f"Actual deletion rate (train): {actual_del_rate:.2%}  |  gate mean: {gate_mean}  std: {gate_std}  |  alpha_final: {alpha_final}  |  time: {duration_sec}s")
+
+    if use_wandb:
+        wandb.log({
+            "val/accuracy": val_acc,
+            "val/em": val_acc if is_qa else None,
+            "actual_deletion_rate": actual_del_rate,
+            "gate_mean": gate_mean,
+            "gate_std": gate_std,
+            "alpha_final": alpha_final,
+            "duration_sec": duration_sec,
+            "avg_train_loss": final_avg_train_loss,
+        })
+        wandb.finish()
 
     if args.output_result:
         import json

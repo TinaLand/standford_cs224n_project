@@ -177,9 +177,17 @@ python scripts/aggregate_results.py
 
 # Optional: run latency benchmark and write to results/latency_results.json (then re-run aggregate_results)
 python latency_benchmark.py --output_result results/latency_results.json
+
+# Optional: log metrics to Weights & Biases for visualization
+USE_WANDB=1 ./run_experiments.sh
+# Or for a single run: python train_mrbert.py --dataset mrpc --epochs 3 --use_wandb --wandb_project mrbert
 ```
 
-### 8. Gate interpretability (which tokens are deleted?)
+### 8. Weights & Biases (WandB)
+
+If you pass `--use_wandb` (or set `USE_WANDB=1` when running `./run_experiments.sh`), training will log to [Weights & Biases](https://wandb.ai): step-wise `train/loss`, `train/loss_ce`, `train/loss_gate`, `train/deletion_rate`, `train/gate_mean`, and PI state; per-epoch `train/epoch_loss`; and at the end `val/accuracy`, `actual_deletion_rate`, `gate_mean`, `gate_std`, `duration_sec`. Install with `pip install wandb` and run `wandb login` once.
+
+### 9. Gate interpretability (which tokens are deleted?)
 
 ```bash
 # Per-token gate score and KEEP/DEL
