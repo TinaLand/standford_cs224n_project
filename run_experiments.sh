@@ -1,5 +1,11 @@
 #!/usr/bin/env bash
 # Run baseline and MrBERT experiments, appending results to results/train_results.jsonl.
+# Scripts run automatically after training:
+#   Step 11: scripts/aggregate_results.py
+#   Step 12: scripts/extract_error_cases.py (SNLI, TyDi QA)
+#   Step 13: scripts/analyze_loss_vs_deletion.py (mrpc, snli, sst2, tydiqa)
+#   Step 14: scripts/roberta_pruning_demo.py, scripts/xlm_pruning_demo.py
+#
 # Usage:
 #   ./run_experiments.sh              # full run (MRPC, IMDB, SNLI, SST-2, TyDi QA)
 #   QUICK=1 ./run_experiments.sh      # quick: MRPC 200 samples + latency only
@@ -52,6 +58,8 @@ if [ "${QUICK:-0}" = "1" ]; then
   python3 latency_benchmark.py --batch_size 16 --seq_length 256 --steps 20 --output_result results/latency_results.json
   echo "=== Aggregating results into RESULTS.md ==="
   python3 scripts/aggregate_results.py || echo "aggregate_results failed (QUICK mode)"
+  echo "=== Loss vs deletion (MRPC, quick) ==="
+  python3 -m scripts.analyze_loss_vs_deletion --dataset mrpc --max_samples 200 --output results/loss_vs_deletion_mrpc.json || echo "analyze_loss_vs_deletion failed (QUICK)"
   echo "Done."
   exit 0
 fi
@@ -100,4 +108,20 @@ if [ "${SKIP_TYDIQA:-0}" != "1" ]; then
   python3 -m scripts.extract_error_cases --dataset tydiqa --max_samples 1000 --output results/error_cases_tydiqa.jsonl || echo "extract_error_cases (TyDi QA) failed"
 fi
 
-echo "=== Done. Results in $RESULTS_FILE; error cases in results/error_cases_*.jsonl ==="
+echo "=== 13. Loss vs deletion correlation (per-example) ==="
+python3 -m scripts.analyze_loss_vs_deletion --dataset mrpc --max_samples 500 --output results/loss_vs_deletion_mrpc.json || echo "analyze_loss_vs_deletion (MRPC) failed"
+if [ "${SKIP_SNLI:-0}" != "1" ]; then
+  python3 -m scripts.analyze_loss_vs_deletion --dataset snli --max_samples 500 --output results/loss_vs_deletion_snli.json || echo "analyze_loss_vs_deletion (SNLI) failed"
+fi
+if [ "${SKIP_SST2:-0}" != "1" ]; then
+  python3 -m scripts.analyze_loss_vs_deletion --dataset sst2 --max_samples 500 --output results/loss_vs_deletion_sst2.json || echo "analyze_loss_vs_deletion (SST-2) failed"
+fi
+if [ "${SKIP_TYDIQA:-0}" != "1" ]; then
+  python3 -m scripts.analyze_loss_vs_deletion --dataset tydiqa --max_length 256 --max_samples 500 --output results/loss_vs_deletion_tydiqa.json || echo "analyze_loss_vs_deletion (TyDi QA) failed"
+fi
+
+echo "=== 14. Architecture demos (MrRoBERTa / MrXLM) ==="
+python3 -m scripts.roberta_pruning_demo || echo "roberta_pruning_demo failed"
+python3 -m scripts.xlm_pruning_demo || echo "xlm_pruning_demo failed"
+
+echo "=== Done. Results in $RESULTS_FILE; error cases in results/error_cases_*.jsonl; loss vs deletion in results/loss_vs_deletion_*.json ==="
