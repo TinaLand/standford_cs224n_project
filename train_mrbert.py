@@ -197,6 +197,8 @@ def main():
     parser.add_argument("--gate_weight", type=float, default=1e-4, help="Gate regularizer weight (alpha)")
     parser.add_argument("--use_pi", action="store_true", help="Use PI controller for target deletion ratio")
     parser.add_argument("--target_deletion", type=float, default=0.5, help="Target deletion ratio (for PI)")
+    parser.add_argument("--gate_warmup_steps", type=int, default=0,
+                        help="Gate warm-up: first N steps use gate_regularizer_weight=0 (gate computed but no deletion pressure). 0 = disabled.")
     parser.add_argument("--phase1_steps", type=int, default=0,
                         help="Phase A: first N steps with --phase1_gate_weight (gate adaptation); 0 = disabled")
     parser.add_argument("--phase1_gate_weight", type=float, default=1e-3,
@@ -321,9 +323,18 @@ def main():
                 "max_length": args.max_length,
                 "task_type": task_type,
                 "max_train_samples": args.max_train_samples,
+                "gate_warmup_steps": args.gate_warmup_steps,
             },
             name=args.wandb_run_name or f"{args.dataset}_{'mrbert' if (args.gate_weight != 0 or args.use_pi) else 'baseline'}",
         )
+        # Define x-axis for cleaner charts: train/pruning/pi vs step, val vs step (after each epoch)
+        wandb.define_metric("step")
+        wandb.define_metric("train/*", step_metric="step")
+        wandb.define_metric("pruning/*", step_metric="step")
+        wandb.define_metric("pi/*", step_metric="step")
+        wandb.define_metric("val/*", step_metric="step")
+        wandb.define_metric("sys/*", step_metric="step")
+        wandb.define_metric("epoch")
 
     # PI failure warnings (log_level >= 2)
     _pi_warned_alpha_zero = False
@@ -345,7 +356,11 @@ def main():
         model.train()
         epoch_loss = 0.0
         for batch in train_loader:
-            alpha = args.phase1_gate_weight if (args.phase1_steps > 0 and step < args.phase1_steps) else gate_regularizer_weight
+            # Gate warm-up: first N steps no gate loss (model learns on full sequence)
+            if args.gate_warmup_steps > 0 and step < args.gate_warmup_steps:
+                alpha = 0.0
+            else:
+                alpha = args.phase1_gate_weight if (args.phase1_steps > 0 and step < args.phase1_steps) else gate_regularizer_weight
             optimizer.zero_grad()
             input_ids = batch["input_ids"].to(device)
             attention_mask = batch["attention_mask"].to(device)
@@ -377,8 +392,9 @@ def main():
             epoch_loss += loss.item()
             step += 1
             pi_state = None
-            if pi is not None and out.get("gate") is not None:
-                res = pi.step(out["gate"], gate_k=gate_k, return_state=(args.log_level >= 2))
+            # Update PI only after gate warm-up (so alpha is not driven up during warm-up)
+            if pi is not None and out.get("gate") is not None and (args.gate_warmup_steps <= 0 or step > args.gate_warmup_steps):
+                res = pi.step(out["gate"], gate_k=gate_k, return_state=(args.log_level >= 2 or use_wandb))
                 if isinstance(res, tuple):
                     gate_regularizer_weight, pi_state = res
                 else:
@@ -391,21 +407,29 @@ def main():
                     sum_gate_mean += gate.mean().item()
                     sum_gate_var += gate.var().item()
                     n_gate_batches += 1
+            if step == args.gate_warmup_steps and args.gate_warmup_steps > 0:
+                print(f"  Gate warm-up done at step {step}; enabling gate regularizer (alpha={gate_regularizer_weight:.2e})")
             if step == args.phase1_steps and args.phase1_steps > 0:
                 print(f"  Phase A done at step {step}; switching to Phase B (gate_weight={gate_regularizer_weight:.2e})")
             if step % 100 == 0:
                 if use_wandb:
-                    log_dict = {"train/loss": loss.item(), "step": step}
+                    log_dict = {"step": step, "train/loss": loss.item()}
                     if out.get("loss_ce") is not None:
                         log_dict["train/loss_ce"] = out["loss_ce"].item()
                     if out.get("loss_gate") is not None:
                         log_dict["train/loss_gate"] = out["loss_gate"].item()
                     if gate is not None:
-                        log_dict["train/deletion_rate"] = (gate < threshold).float().mean().item()
-                        log_dict["train/gate_mean"] = gate.mean().item()
+                        del_rate_step = (gate < threshold).float().mean().item()
+                        log_dict["pruning/actual_deletion_rate"] = del_rate_step
+                        log_dict["pruning/gate_mean"] = gate.mean().item()
+                        log_dict["pruning/gate_std"] = gate.var().sqrt().item()
+                        if args.use_pi:
+                            log_dict["pruning/target_deletion"] = args.target_deletion
                     if pi_state is not None:
-                        log_dict["train/pi_alpha"] = pi_state.get("alpha", gate_regularizer_weight)
-                        log_dict["train/pi_deletion_ratio"] = pi_state.get("current_ratio", 0)
+                        log_dict["pi/error"] = pi_state.get("error", 0)
+                        log_dict["pi/alpha"] = pi_state.get("alpha", gate_regularizer_weight)
+                        log_dict["pi/integral_term"] = pi_state.get("i", 0)
+                        log_dict["pi/proportional_term"] = pi_state.get("p", 0)
                     wandb.log(log_dict, step=step)
                 msg = f"  step {step}/{total_steps} loss: {loss.item():.4f}"
                 if args.log_level >= 1:
@@ -433,13 +457,14 @@ def main():
         avg_train = epoch_loss / len(train_loader)
         final_avg_train_loss = avg_train
         if use_wandb:
-            wandb.log({"train/epoch_loss": avg_train, "epoch": epoch + 1}, step=step)
+            wandb.log({"step": step, "epoch": epoch + 1, "train/epoch_loss": avg_train, "train/avg_train_loss": avg_train}, step=step)
         print(f"Epoch {epoch + 1}/{args.epochs} avg train loss: {avg_train:.4f}")
 
     # Validation
     model.eval()
     correct, total = 0, 0
     qa_exact_match = 0
+    sum_kept_tokens, n_kept_batches = 0, 0
     with torch.no_grad():
         for batch in val_loader:
             input_ids = batch["input_ids"].to(device)
@@ -467,6 +492,8 @@ def main():
                     pred_end_short = torch.minimum(pred_end_short, max_valid)
                     pred_start = keep_indices.gather(1, pred_start_short.unsqueeze(1)).squeeze(1)
                     pred_end = keep_indices.gather(1, pred_end_short.unsqueeze(1)).squeeze(1)
+                    sum_kept_tokens += kept_lengths.sum().item()
+                    n_kept_batches += start_positions.size(0)
                 else:
                     pred_start, pred_end = pred_start_short, pred_end_short
                 qa_exact_match += ((pred_start == start_positions) & (pred_end == end_positions)).sum().item()
@@ -481,6 +508,10 @@ def main():
                 preds = out["logits"].argmax(dim=1)
                 correct += (preds == labels).sum().item()
                 total += labels.size(0)
+                kept_lengths = out.get("kept_lengths")
+                if kept_lengths is not None:
+                    sum_kept_tokens += kept_lengths.sum().item()
+                    n_kept_batches += labels.size(0)
     if is_qa:
         val_acc = qa_exact_match / total if total else 0.0
         print(f"Validation exact match: {val_acc:.4f} ({qa_exact_match}/{total})")
@@ -520,20 +551,33 @@ def main():
     gate_mean = round(sum_gate_mean / n_gate_batches, 4) if n_gate_batches else None
     gate_std = round((sum_gate_var / n_gate_batches) ** 0.5, 4) if n_gate_batches else None
     alpha_final = round(gate_regularizer_weight, 6) if (pi is not None and n_gate_batches) else None
+    kept_tokens_avg = round(sum_kept_tokens / n_kept_batches, 1) if n_kept_batches else None
+    total_train_samples = len(train_loader.dataset) * args.epochs
+    throughput = round(total_train_samples / duration_sec, 2) if duration_sec > 0 else None
+    total_batches = len(train_loader) * args.epochs
+    avg_latency_ms = round(duration_sec * 1000 / total_batches, 2) if total_batches > 0 else None
+    max_mem_gb = round(torch.cuda.max_memory_allocated(device) / 1e9, 4) if device.type == "cuda" else None
     if n_gate_batches:
         print(f"Actual deletion rate (train): {actual_del_rate:.2%}  |  gate mean: {gate_mean}  std: {gate_std}  |  alpha_final: {alpha_final}  |  time: {duration_sec}s")
 
     if use_wandb:
         wandb.log({
-            "val/accuracy": val_acc,
+            "step": step,
+            "val/accuracy": val_acc if not is_qa else None,
             "val/em": val_acc if is_qa else None,
-            "actual_deletion_rate": actual_del_rate,
-            "gate_mean": gate_mean,
-            "gate_std": gate_std,
-            "alpha_final": alpha_final,
+            "val/exact_match": val_acc if is_qa else None,
+            "pruning/actual_deletion_rate": actual_del_rate,
+            "pruning/gate_mean": gate_mean,
+            "pruning/gate_std": gate_std,
+            "pruning/target_deletion": args.target_deletion if args.use_pi else None,
+            "pruning/kept_tokens": kept_tokens_avg,
+            "pi/alpha_final": alpha_final,
+            "train/avg_train_loss": final_avg_train_loss,
             "duration_sec": duration_sec,
-            "avg_train_loss": final_avg_train_loss,
-        })
+            "sys/throughput": throughput,
+            "sys/latency_ms": avg_latency_ms,
+            "sys/max_memory_allocated": max_mem_gb,
+        }, step=step)
         wandb.finish()
 
     if args.output_result:
