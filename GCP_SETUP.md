@@ -99,14 +99,23 @@ gcloud compute instances create mrbert-gpu \
   --metadata="install-nvidia-driver=True"
 
 L4 GPU
-gcloud compute instances create mrbert-l4-fast \
+
+ gcloud compute instances create mrbert-l4-central \
     --project=cs224n-ah \
-    --zone=asia-east1-a \
+    --zone=us-central1-a \
     --machine-type=g2-standard-4 \
     --accelerator=count=1,type=nvidia-l4 \
-    --image-family=pytorch-latest-gpu \
+    --image-family=pytorch-2-7-cu128-ubuntu-2204-nvidia-570 \
     --image-project=deeplearning-platform-release \
-    --boot-disk-size=100GB
+    --boot-disk-size=200GB \
+    --metadata="install-nvidia-driver=True" \
+    --maintenance-policy=TERMINATE
+Created [https://www.googleapis.com/compute/v1/projects/cs224n-ah/zones/us-central1-a/instances/mrbert-l4-central].
+WARNING: Some requests generated warnings:
+ - Disk size: '200 GB' is larger than image size: '100 GB'. You might need to resize the root repartition manually if the operating system does not support automatic resizing. See https://cloud.google.com/compute/docs/disks/add-persistent-disk#resize_pd for details.
+
+NAME               ZONE           MACHINE_TYPE   PREEMPTIBLE  INTERNAL_IP  EXTERNAL_IP     STATUS
+mrbert-l4-central  us-central1-a  g2-standard-4               10.128.0.2   34.133.172.199  RUNNING
 ```
 
 # Set ZONE to the zone where the VM was created
