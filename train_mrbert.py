@@ -545,6 +545,56 @@ def main():
             )
         model.mrbert.config.log_shapes = old_log_shapes
 
+    # Inference-time benchmark: forward-only, no backward (eval mode + no_grad)
+    model.eval()
+    num_inference_warmup, num_inference_batches = 5, 50
+    inf_batches_done, inf_total_samples = 0, 0
+    inf_timed_start = None
+    with torch.no_grad():
+        val_iter = iter(val_loader)
+        for _ in range(num_inference_warmup + num_inference_batches):
+            try:
+                batch = next(val_iter)
+            except StopIteration:
+                val_iter = iter(val_loader)
+                batch = next(val_iter)
+            input_ids = batch["input_ids"].to(device)
+            attention_mask = batch["attention_mask"].to(device)
+            token_type_ids = batch.get("token_type_ids")
+            if token_type_ids is not None:
+                token_type_ids = token_type_ids.to(device)
+            if device.type == "cuda":
+                torch.cuda.synchronize()
+            t0 = time.perf_counter()
+            if is_qa:
+                _ = model(
+                    input_ids=input_ids,
+                    attention_mask=attention_mask,
+                    token_type_ids=token_type_ids,
+                    gate_regularizer_weight=0.0,
+                )
+            else:
+                _ = model(
+                    input_ids=input_ids,
+                    attention_mask=attention_mask,
+                    gate_regularizer_weight=0.0,
+                )
+            if device.type == "cuda":
+                torch.cuda.synchronize()
+            if inf_batches_done == num_inference_warmup:
+                inf_timed_start = time.perf_counter()
+            if inf_batches_done >= num_inference_warmup:
+                inf_total_samples += input_ids.size(0)
+            inf_batches_done += 1
+            if inf_batches_done >= num_inference_warmup + num_inference_batches:
+                break
+    inf_timed_end = time.perf_counter()
+    inf_elapsed_sec = (inf_timed_end - inf_timed_start) if inf_timed_start is not None else 0
+    timed_batches = num_inference_batches
+    inference_latency_ms = round(inf_elapsed_sec * 1000 / timed_batches, 2) if (timed_batches > 0 and inf_elapsed_sec > 0) else None
+    inference_throughput = round(inf_total_samples / inf_elapsed_sec, 2) if inf_elapsed_sec > 0 else None
+    if inference_latency_ms is not None:
+        print(f"Inference: {inference_latency_ms} ms/batch  |  {inference_throughput} samples/sec")
 
     duration_sec = round(time.time() - start_time, 1)
     actual_del_rate = round(sum_del_rate / n_gate_batches, 4) if n_gate_batches else None
@@ -576,6 +626,8 @@ def main():
             "duration_sec": duration_sec,
             "sys/throughput": throughput,
             "sys/latency_ms": avg_latency_ms,
+            "sys/inference_latency_ms": inference_latency_ms,
+            "sys/inference_throughput": inference_throughput,
             "sys/max_memory_allocated": max_mem_gb,
         }, step=step)
         wandb.finish()
