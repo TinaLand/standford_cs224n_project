@@ -65,6 +65,7 @@ def run_xlmr_experiments(
     mr_use_pi: bool = True,
     log_level: int = 1,
     gate_warmup_steps: int = 0,
+    use_wandb: bool = True,
     skip_snli: bool = False,
     skip_sst2: bool = False,
     skip_xnli: bool = False,
@@ -80,7 +81,17 @@ def run_xlmr_experiments(
     env["LOG_LEVEL"] = str(log_level)
     env["GATE_WARMUP_STEPS"] = str(gate_warmup_steps)
     env["PYTHONPATH"] = "/workspace"
-    env["WANDB_MODE"] = "1"
+    # WandB: if use_wandb is True, enable --use_wandb for train_mrbert.py.
+    # If WANDB_API_KEY is not present inside the container, default to offline mode
+    # so the run does not block waiting for interactive login.
+    if use_wandb:
+        env["USE_WANDB"] = "1"
+        if "WANDB_API_KEY" not in env and "WANDB_MODE" not in env:
+            env["WANDB_MODE"] = "offline"
+    else:
+        env.pop("USE_WANDB", None)
+        if "WANDB_MODE" not in env:
+            env["WANDB_MODE"] = "disabled"
     if skip_snli:
         env["SKIP_SNLI"] = "1"
     if skip_sst2:
@@ -118,6 +129,7 @@ def main(
     mr_use_pi: bool = True,
     log_level: int = 1,
     gate_warmup_steps: int = 0,
+    use_wandb: bool = True,
     skip_snli: bool = False,
     skip_sst2: bool = False,
     skip_xnli: bool = False,
@@ -132,6 +144,7 @@ def main(
         mr_use_pi=mr_use_pi,
         log_level=log_level,
         gate_warmup_steps=gate_warmup_steps,
+        use_wandb=use_wandb,
         skip_snli=skip_snli,
         skip_sst2=skip_sst2,
         skip_xnli=skip_xnli,
