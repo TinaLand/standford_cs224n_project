@@ -306,6 +306,25 @@ class MrXLMRobertaModel(XLMRobertaModel):
         return model_output
 
 
+class XLMRobertaClassificationHead(nn.Module):
+    """Classification head matching HuggingFace XLMRobertaForSequenceClassification."""
+
+    def __init__(self, config: XLMRobertaConfig, num_labels: int):
+        super().__init__()
+        self.dense = nn.Linear(config.hidden_size, config.hidden_size)
+        self.dropout = nn.Dropout(config.hidden_dropout_prob)
+        self.out_proj = nn.Linear(config.hidden_size, num_labels)
+
+    def forward(self, features: torch.Tensor) -> torch.Tensor:
+        # Features are already pooled (batch_size, hidden_size).
+        x = self.dropout(features)
+        x = self.dense(x)
+        x = torch.tanh(x)
+        x = self.dropout(x)
+        x = self.out_proj(x)
+        return x
+
+
 class MrXLMRobertaForSequenceClassification(nn.Module):
     """XLM-R with delete gate and a classification head (for NLI, sentiment, etc.)."""
 
@@ -314,8 +333,10 @@ class MrXLMRobertaForSequenceClassification(nn.Module):
         self.config = config
         self.num_labels = num_labels
         self.mrxlm = MrXLMRobertaModel(config)
+        # Keep a top-level dropout to match HuggingFace module structure.
         self.dropout = nn.Dropout(config.hidden_dropout_prob)
-        self.classifier = nn.Linear(config.hidden_size, num_labels)
+        # Use a head whose submodules (dense / dropout / out_proj) match HF state_dict keys.
+        self.classifier = XLMRobertaClassificationHead(config, num_labels)
 
     @classmethod
     def from_pretrained_xlm(
