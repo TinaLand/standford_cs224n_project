@@ -362,7 +362,6 @@ class MrXLMRobertaForSequenceClassification(nn.Module):
         model = cls(config, num_labels=num_labels)
         model.mrxlm.load_state_dict(hf_model.roberta.state_dict(), strict=False)
         model.classifier.load_state_dict(hf_model.classifier.state_dict())
-        model.dropout.load_state_dict(hf_model.dropout.state_dict())
         return model
 
     def forward(
