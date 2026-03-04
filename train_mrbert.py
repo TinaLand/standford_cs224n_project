@@ -6,6 +6,8 @@ Optional two-phase: Phase A = gate adaptation (first N steps with gate regulariz
 Phase B = task finetuning (same loss, typically lower gate_weight).
 """
 import argparse
+import re
+import subprocess
 import time
 import sys
 import datetime
@@ -17,6 +19,35 @@ from datasets import load_dataset
 
 from mrbert import MrBertForSequenceClassification, MrBertForQuestionAnswering, MrXLMRobertaForSequenceClassification, MrXLMRobertaForQuestionAnswering
 from mrbert.pi_controller import PIController
+
+
+def _get_gpu_system_metrics():
+    """Query nvidia-smi for ECC errors and memory clock; return dict for wandb (or empty dict on failure)."""
+    out = {}
+    try:
+        result = subprocess.run(
+            ["nvidia-smi", "-q", "-d", "ECC,CLOCK"],
+            capture_output=True,
+            text=True,
+            timeout=5,
+        )
+        if result.returncode != 0:
+            return out
+        text = result.stdout or ""
+        # ECC: Volatile -> Single Bit (corrected) / Double Bit (uncorrected) -> Device Memory or Total
+        single = re.search(r"Single Bit\s+.*?Device Memory:\s*(\d+)", text, re.DOTALL)
+        double = re.search(r"Double Bit\s+.*?Device Memory:\s*(\d+)", text, re.DOTALL)
+        if single:
+            out["system/gpu_corrected_memory_errors"] = int(single.group(1))
+        if double:
+            out["system/gpu_uncorrected_memory_errors"] = int(double.group(1))
+        # Clocks -> Memory: "Memory:         1215 MHz"
+        mem_clock = re.search(r"Memory:\s*(\d+)\s*MHz", text)
+        if mem_clock:
+            out["system/gpu_memory_clock_mhz"] = int(mem_clock.group(1))
+    except (FileNotFoundError, subprocess.TimeoutExpired, ValueError):
+        pass
+    return out
 
 
 def _prepare_tydiqa_example(ex, tokenizer, max_length):
@@ -407,7 +438,9 @@ def main():
         wandb.define_metric("pruning/*", step_metric="step")
         wandb.define_metric("pi/*", step_metric="step")
         wandb.define_metric("val/*", step_metric="step")
+        wandb.define_metric("test/*", step_metric="step")
         wandb.define_metric("sys/*", step_metric="step")
+        wandb.define_metric("system/*", step_metric="step")
         wandb.define_metric("epoch")
 
     # PI failure warnings (log_level >= 2)
@@ -504,6 +537,10 @@ def main():
                         log_dict["pi/alpha"] = pi_state.get("alpha", gate_regularizer_weight)
                         log_dict["pi/integral_term"] = pi_state.get("i", 0)
                         log_dict["pi/proportional_term"] = pi_state.get("p", 0)
+                    # GPU system metrics so wandb shows charts for uncorrected/corrected errors and memory clock
+                    if device.type == "cuda":
+                        gpu_metrics = _get_gpu_system_metrics()
+                        log_dict.update(gpu_metrics)
                     wandb.log(log_dict, step=step)
                 msg = f"  step {step}/{total_steps} loss: {loss.item():.4f}"
                 if args.log_level >= 1:
@@ -534,7 +571,76 @@ def main():
             wandb.log({"step": step, "epoch": epoch + 1, "train/epoch_loss": avg_train, "train/avg_train_loss": avg_train}, step=step)
         print(f"Epoch {epoch + 1}/{args.epochs} avg train loss: {avg_train:.4f}")
 
-    # Validation
+        # Validation after each epoch (so wandb has a curve for val/test section)
+        model.eval()
+        correct, total = 0, 0
+        qa_exact_match = 0
+        sum_kept_tokens, n_kept_batches = 0, 0
+        with torch.no_grad():
+            for batch in val_loader:
+                input_ids = batch["input_ids"].to(device)
+                attention_mask = batch["attention_mask"].to(device)
+                token_type_ids = batch.get("token_type_ids")
+                if token_type_ids is not None:
+                    token_type_ids = token_type_ids.to(device)
+                if is_qa:
+                    start_positions = batch["start_positions"].to(device)
+                    end_positions = batch["end_positions"].to(device)
+                    out = model(
+                        input_ids=input_ids,
+                        attention_mask=attention_mask,
+                        token_type_ids=token_type_ids,
+                        gate_regularizer_weight=0.0,
+                    )
+                    pred_start_short = out["start_logits"].argmax(dim=1)
+                    pred_end_short = out["end_logits"].argmax(dim=1)
+                    keep_indices = out.get("keep_indices")
+                    kept_lengths = out.get("kept_lengths")
+                    if keep_indices is not None and kept_lengths is not None:
+                        max_valid = (kept_lengths - 1).clamp(min=0)
+                        pred_start_short = torch.minimum(pred_start_short, max_valid)
+                        pred_end_short = torch.minimum(pred_end_short, max_valid)
+                        pred_start = keep_indices.gather(1, pred_start_short.unsqueeze(1)).squeeze(1)
+                        pred_end = keep_indices.gather(1, pred_end_short.unsqueeze(1)).squeeze(1)
+                        sum_kept_tokens += kept_lengths.sum().item()
+                        n_kept_batches += start_positions.size(0)
+                    else:
+                        pred_start, pred_end = pred_start_short, pred_end_short
+                    qa_exact_match += ((pred_start == start_positions) & (pred_end == end_positions)).sum().item()
+                    total += start_positions.size(0)
+                else:
+                    labels = batch["label"].to(device)
+                    out = model(
+                        input_ids=input_ids,
+                        attention_mask=attention_mask,
+                        gate_regularizer_weight=0.0,
+                    )
+                    preds = out["logits"].argmax(dim=1)
+                    correct += (preds == labels).sum().item()
+                    total += labels.size(0)
+                    kept_lengths = out.get("kept_lengths")
+                    if kept_lengths is not None:
+                        sum_kept_tokens += kept_lengths.sum().item()
+                        n_kept_batches += labels.size(0)
+        if is_qa:
+            val_acc = qa_exact_match / total if total else 0.0
+        else:
+            val_acc = correct / total if total else 0.0
+        if use_wandb:
+            log_val = {"step": step, "epoch": epoch + 1}
+            if is_qa:
+                log_val["val/em"] = val_acc
+                log_val["val/exact_match"] = val_acc
+                log_val["test/em"] = val_acc
+                log_val["test/loss"] = 1.0 - val_acc  # so test section has a curve
+            else:
+                log_val["val/accuracy"] = val_acc
+                log_val["test/accuracy"] = val_acc
+                log_val["test/loss"] = 1.0 - val_acc
+            wandb.log(log_val, step=step)
+        print(f"  Validation: {val_acc:.4f} ({'EM' if is_qa else 'acc'})")
+
+    # Final validation (reuse last epoch's val_acc; run again for log_level>=3 and inference benchmark)
     model.eval()
     correct, total = 0, 0
     qa_exact_match = 0
