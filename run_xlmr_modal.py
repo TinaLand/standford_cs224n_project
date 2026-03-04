@@ -6,8 +6,12 @@ Only runs XLM-R / MrXLM (no BERT). Results are written to a Modal Volume.
 Usage (from project root):
   modal run run_xlmr_modal.py
 
-Optional env (edit in code or add CLI later):
-  EPOCHS=3, BATCH=8, SKIP_SNLI=0, SKIP_SST2=0, SKIP_XNLI=0, SKIP_TYDIQA=0
+Same controls as BERT (run_experiments.sh):
+  MR_TARGET_DEL=0.5, MR_USE_PI=1, EPOCHS=3, BATCH=8, LOG_LEVEL=1, GATE_WARMUP_STEPS=0
+
+Example (from project root):
+  modal run run_xlmr_modal.py
+  modal run run_xlmr_modal.py --epochs 2 --batch 16 --log-level 1 --gate-warmup-steps 1000
 """
 import os
 import subprocess
@@ -57,18 +61,25 @@ volume = modal.Volume.from_name("xlmr-results", create_if_missing=True)
 def run_xlmr_experiments(
     epochs: int = 3,
     batch_size: int = 8,
+    mr_target_del: float = 0.5,
+    mr_use_pi: bool = True,
+    log_level: int = 1,
+    gate_warmup_steps: int = 0,
     skip_snli: bool = False,
     skip_sst2: bool = False,
     skip_xnli: bool = False,
     skip_tydiqa: bool = False,
 ):
-    """Run only XLM-R / MrXLM experiments (no BERT)."""
+    """Run only XLM-R / MrXLM experiments (no BERT). Same env as BERT: MR_TARGET_DEL, MR_USE_PI, LOG_LEVEL, GATE_WARMUP_STEPS."""
     env = os.environ.copy()
     env["MODELS"] = "xlmr"
     env["EPOCHS"] = str(epochs)
     env["BATCH"] = str(batch_size)
+    env["MR_TARGET_DEL"] = str(mr_target_del)
+    env["MR_USE_PI"] = "1" if mr_use_pi else "0"
+    env["LOG_LEVEL"] = str(log_level)
+    env["GATE_WARMUP_STEPS"] = str(gate_warmup_steps)
     env["PYTHONPATH"] = "/workspace"
-    # Disable wandb interactive login on Modal (no browser)
     env["WANDB_MODE"] = "offline"
     if skip_snli:
         env["SKIP_SNLI"] = "1"
@@ -103,6 +114,10 @@ def run_xlmr_experiments(
 def main(
     epochs: int = 3,
     batch: int = 8,
+    mr_target_del: float = 0.5,
+    mr_use_pi: bool = True,
+    log_level: int = 1,
+    gate_warmup_steps: int = 0,
     skip_snli: bool = False,
     skip_sst2: bool = False,
     skip_xnli: bool = False,
@@ -113,6 +128,10 @@ def main(
     run_xlmr_experiments.remote(
         epochs=epochs,
         batch_size=batch,
+        mr_target_del=mr_target_del,
+        mr_use_pi=mr_use_pi,
+        log_level=log_level,
+        gate_warmup_steps=gate_warmup_steps,
         skip_snli=skip_snli,
         skip_sst2=skip_sst2,
         skip_xnli=skip_xnli,
