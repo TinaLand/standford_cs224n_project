@@ -80,7 +80,7 @@ def run_xlmr_experiments(
     env["LOG_LEVEL"] = str(log_level)
     env["GATE_WARMUP_STEPS"] = str(gate_warmup_steps)
     env["PYTHONPATH"] = "/workspace"
-    env["WANDB_MODE"] = "offline"
+    env["WANDB_MODE"] = "1"
     if skip_snli:
         env["SKIP_SNLI"] = "1"
     if skip_sst2:
