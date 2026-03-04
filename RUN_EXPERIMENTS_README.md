@@ -16,6 +16,7 @@
 | 8 | MrBERT | **SST-2** | same as above |
 | 9 | Baseline BERT | **TyDi QA** | only if `SKIP_TYDIQA=1` is not set |
 | 10 | MrBERT | **TyDi QA** | same as above |
+| **10b** | **MrXLM (XLM-R)** | **MRPC** | `--backbone xlmr`, same PI/gate; results include `"backbone":"xlmr"` |
 
 - **Environment variables**: `EPOCHS`, `BATCH` can be overridden (defaults 1 and 8); `SKIP_SNLI=1`, `SKIP_SST2=1`, `SKIP_TYDIQA=1` skip the corresponding datasets.
 - **Not run automatically**: `scripts/aggregate_results.py` — run it yourself after experiments to update RESULTS.md.

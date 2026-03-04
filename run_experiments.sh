@@ -3,6 +3,7 @@
 # Scripts run automatically after training:
 #   Step 11: scripts/aggregate_results.py
 #   Step 12: scripts/extract_error_cases.py (SNLI, TyDi QA)
+#   Step 10b–10h: MrXLM (XLM-R) on MRPC, SST-2, SNLI, IMDB, XNLI, TyDi QA (--backbone xlmr)
 #   Step 13: scripts/analyze_loss_vs_deletion.py (mrpc, snli, sst2, tydiqa)
 #   Step 14: scripts/roberta_pruning_demo.py, scripts/xlm_pruning_demo.py
 #
@@ -11,6 +12,7 @@
 #   QUICK=1 ./run_experiments.sh      # quick: MRPC 200 samples + latency only
 #   SKIP_SNLI=1 ./run_experiments.sh  # skip SNLI (faster)
 #   SKIP_SST2=1 ./run_experiments.sh  # skip SST-2
+#   SKIP_XNLI=1 ./run_experiments.sh  # skip XNLI (cross-lingual NLI)
 #   SKIP_TYDIQA=1 ./run_experiments.sh  # skip TyDi QA (saves time)
 #   EPOCHS=3 BATCH=16 ./run_experiments.sh  # custom epochs/batch
 #   LOG_LEVEL=1 ./run_experiments.sh        # write logs for every run (1=minimal, 2=+PI, 3=+gate details)
@@ -97,6 +99,38 @@ if [ "${SKIP_TYDIQA:-0}" != "1" ]; then
   python3 train_mrbert.py --dataset tydiqa --epochs "$EPOCHS" --batch_size "$BATCH" --max_length 256 --gate_weight 1e-4 "${MR_PI_ARGS[@]}" "${LOG_ARGS[@]}" "${WANDB_ARGS[@]}" --output_result "$RESULTS_FILE"
 fi
 
+if [ "${SKIP_XNLI:-0}" != "1" ]; then
+  echo "=== 8b. Baseline BERT: XNLI (en) ==="
+  python3 train_mrbert.py --dataset xnli --epochs "$EPOCHS" --batch_size "$BATCH" --gate_weight 0.0 "${LOG_ARGS[@]}" "${WANDB_ARGS[@]}" --output_result "$RESULTS_FILE"
+  echo "=== 8c. MrBERT: XNLI (en) ==="
+  python3 train_mrbert.py --dataset xnli --epochs "$EPOCHS" --batch_size "$BATCH" --gate_weight 1e-4 "${MR_PI_ARGS[@]}" "${LOG_ARGS[@]}" "${WANDB_ARGS[@]}" --output_result "$RESULTS_FILE"
+fi
+
+echo "=== 10b. MrXLM (XLM-R): MRPC ==="
+python3 train_mrbert.py --dataset mrpc --backbone xlmr --epochs "$EPOCHS" --batch_size "$BATCH" --gate_weight 1e-4 "${MR_PI_ARGS[@]}" "${LOG_ARGS[@]}" "${WANDB_ARGS[@]}" --output_result "$RESULTS_FILE" || echo "MrXLM (XLM-R) MRPC failed"
+
+if [ "${SKIP_SST2:-0}" != "1" ]; then
+  echo "=== 10c. MrXLM (XLM-R): SST-2 ==="
+  python3 train_mrbert.py --dataset sst2 --backbone xlmr --epochs "$EPOCHS" --batch_size "$BATCH" --gate_weight 1e-4 "${MR_PI_ARGS[@]}" "${LOG_ARGS[@]}" "${WANDB_ARGS[@]}" --output_result "$RESULTS_FILE" || echo "MrXLM (XLM-R) SST-2 failed"
+fi
+if [ "${SKIP_SNLI:-0}" != "1" ]; then
+  echo "=== 10d. MrXLM (XLM-R): SNLI ==="
+  python3 train_mrbert.py --dataset snli --backbone xlmr --epochs "$EPOCHS" --batch_size "$BATCH" --gate_weight 1e-4 "${MR_PI_ARGS[@]}" "${LOG_ARGS[@]}" "${WANDB_ARGS[@]}" --output_result "$RESULTS_FILE" || echo "MrXLM (XLM-R) SNLI failed"
+fi
+echo "=== 10e. MrXLM (XLM-R): IMDB ==="
+python3 train_mrbert.py --dataset imdb --backbone xlmr --epochs "$EPOCHS" --batch_size "$BATCH" --gate_weight 1e-4 "${MR_PI_ARGS[@]}" "${LOG_ARGS[@]}" "${WANDB_ARGS[@]}" --output_result "$RESULTS_FILE" || echo "MrXLM (XLM-R) IMDB failed"
+
+if [ "${SKIP_XNLI:-0}" != "1" ]; then
+  echo "=== 10f. MrXLM (XLM-R): XNLI (en) ==="
+  python3 train_mrbert.py --dataset xnli --backbone xlmr --epochs "$EPOCHS" --batch_size "$BATCH" --gate_weight 1e-4 "${MR_PI_ARGS[@]}" "${LOG_ARGS[@]}" "${WANDB_ARGS[@]}" --output_result "$RESULTS_FILE" || echo "MrXLM (XLM-R) XNLI failed"
+fi
+if [ "${SKIP_TYDIQA:-0}" != "1" ]; then
+  echo "=== 10g. Baseline XLM-R: TyDi QA ==="
+  python3 train_mrbert.py --dataset tydiqa --backbone xlmr --epochs "$EPOCHS" --batch_size "$BATCH" --max_length 256 --gate_weight 0.0 "${LOG_ARGS[@]}" "${WANDB_ARGS[@]}" --output_result "$RESULTS_FILE" || echo "Baseline XLM-R TyDi QA failed"
+  echo "=== 10h. MrXLM (XLM-R): TyDi QA ==="
+  python3 train_mrbert.py --dataset tydiqa --backbone xlmr --epochs "$EPOCHS" --batch_size "$BATCH" --max_length 256 --gate_weight 1e-4 "${MR_PI_ARGS[@]}" "${LOG_ARGS[@]}" "${WANDB_ARGS[@]}" --output_result "$RESULTS_FILE" || echo "MrXLM (XLM-R) TyDi QA failed"
+fi
+
 echo "=== 11. Aggregating results into RESULTS.md ==="
 python3 scripts/aggregate_results.py || echo "aggregate_results failed"
 
@@ -115,6 +149,9 @@ if [ "${SKIP_SNLI:-0}" != "1" ]; then
 fi
 if [ "${SKIP_SST2:-0}" != "1" ]; then
   python3 -m scripts.analyze_loss_vs_deletion --dataset sst2 --max_samples 500 --output results/loss_vs_deletion_sst2.json || echo "analyze_loss_vs_deletion (SST-2) failed"
+fi
+if [ "${SKIP_XNLI:-0}" != "1" ]; then
+  python3 -m scripts.analyze_loss_vs_deletion --dataset xnli --max_samples 500 --output results/loss_vs_deletion_xnli.json || echo "analyze_loss_vs_deletion (XNLI) failed"
 fi
 if [ "${SKIP_TYDIQA:-0}" != "1" ]; then
   python3 -m scripts.analyze_loss_vs_deletion --dataset tydiqa --max_length 256 --max_samples 500 --output results/loss_vs_deletion_tydiqa.json || echo "analyze_loss_vs_deletion (TyDi QA) failed"

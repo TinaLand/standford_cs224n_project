@@ -54,7 +54,7 @@ def main():
         description="Correlation between per-example loss and per-example deletion rate"
     )
     parser.add_argument("--dataset", type=str, default="mrpc",
-                        choices=["mrpc", "imdb", "sst2", "snli", "tydiqa"])
+                        choices=["mrpc", "imdb", "sst2", "snli", "xnli", "tydiqa"])
     parser.add_argument("--max_length", type=int, default=128)
     parser.add_argument("--max_samples", type=int, default=2000,
                         help="Max examples to evaluate (for speed)")

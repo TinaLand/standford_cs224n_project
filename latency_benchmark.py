@@ -149,9 +149,9 @@ def main():
             "steps": args.steps,
             "device": str(device),
         }
-        with open(args.output_result, "w") as f:
-            json.dump(latency_row, f, indent=2)
-        print(f"Latency result written to {args.output_result}")
+        with open(args.output_result, "a") as f:
+            f.write(json.dumps(latency_row) + "\n")
+        print(f"Latency result appended to {args.output_result}")
 
     print("Done.")
 

@@ -1,6 +1,6 @@
 from .configuration_mrbert import MrBertConfig
 from .modeling_mrbert import MrBertModel, MrBertForSequenceClassification, MrBertForQuestionAnswering
-from .modeling_mrxlm import MrXLMRobertaModel
+from .modeling_mrxlm import MrXLMRobertaModel, MrXLMRobertaForSequenceClassification, MrXLMRobertaForQuestionAnswering
 from .modeling_mrroberta import MrRobertaModel
 
 __all__ = [
@@ -9,5 +9,7 @@ __all__ = [
     "MrBertForSequenceClassification",
     "MrBertForQuestionAnswering",
     "MrXLMRobertaModel",
+    "MrXLMRobertaForSequenceClassification",
+    "MrXLMRobertaForQuestionAnswering",
     "MrRobertaModel",
 ]

@@ -15,12 +15,13 @@ from torch.utils.data import DataLoader
 from transformers import BertTokenizer
 from datasets import load_dataset
 
-from mrbert import MrBertForSequenceClassification, MrBertForQuestionAnswering
+from mrbert import MrBertForSequenceClassification, MrBertForQuestionAnswering, MrXLMRobertaForSequenceClassification, MrXLMRobertaForQuestionAnswering
 from mrbert.pi_controller import PIController
 
 
 def _prepare_tydiqa_example(ex, tokenizer, max_length):
-    """Tokenize one TyDi QA example and compute start/end token positions. Drops if answer not in span."""
+    """Tokenize one TyDi QA example and compute start/end token positions. Drops if answer not in span.
+    Works for both BERT (token_type_ids) and XLM-R (no token_type_ids; use second </s> to find context)."""
     question = ex["question"]
     context = ex["context"]
     answers = ex["answers"]
@@ -40,29 +41,65 @@ def _prepare_tydiqa_example(ex, tokenizer, max_length):
     )
     offset_mapping = inputs.pop("offset_mapping")
     token_type_ids = inputs.get("token_type_ids")
+    input_ids = inputs.get("input_ids", [])
+
+    # Find first token index of context (so we only consider context tokens for answer span).
+    # BERT: token_type_ids == 1; XLM-R: no token_type_ids, context starts after second </s>.
+    context_start_idx = 0
+    if token_type_ids is not None:
+        for i in range(len(token_type_ids)):
+            if token_type_ids[i] == 1:
+                context_start_idx = i
+                break
+    else:
+        # XLM-R / RoBERTa: <s> question </s></s> context </s>. Find second sep token.
+        sep_id = getattr(tokenizer, "sep_token_id", None) or getattr(
+            tokenizer, "pad_token_id", tokenizer.convert_tokens_to_ids("</s>")
+        )
+        sep_count = 0
+        for i, tid in enumerate(input_ids):
+            if tid == sep_id:
+                sep_count += 1
+                if sep_count >= 2:
+                    context_start_idx = i + 1
+                    break
+
+    # Character start of context in the concatenated string (for offset_mapping).
+    context_start_char = 0
+    if context_start_idx < len(offset_mapping) and offset_mapping[context_start_idx] != (0, 0):
+        context_start_char = offset_mapping[context_start_idx][0]
+    answer_start_global = context_start_char + answer_start_char
+    answer_end_global = context_start_char + answer_end_char
+
     start_token = -1
     end_token = -1
-    for i, (s, e) in enumerate(offset_mapping):
+    for i in range(context_start_idx, len(offset_mapping)):
+        s, e = offset_mapping[i]
         if s == 0 and e == 0:
             continue
-        if token_type_ids and token_type_ids[i] == 0:
-            continue
-        if s <= answer_start_char < e:
+        if s <= answer_start_global < e:
             start_token = i
-        if s < answer_end_char <= e:
+        if s < answer_end_global <= e:
             end_token = i
             break
     if start_token < 0 or end_token < 0 or end_token < start_token:
         return None
     inputs["start_positions"] = start_token
     inputs["end_positions"] = end_token
+    # XLM-R does not use token_type_ids; remove so downstream can omit the key.
+    if token_type_ids is None:
+        inputs.pop("token_type_ids", None)
     return inputs
 
 
-def get_dataset_and_tokenizer(dataset_name: str, max_length: int):
-    """Load dataset and tokenizer. Supports 'mrpc', 'imdb', 'sst2', 'snli', 'tydiqa'.
-    Returns (train_ds, val_ds, tokenizer, num_labels, task_type). task_type is 'classification' or 'qa'."""
-    tokenizer = BertTokenizer.from_pretrained("bert-base-uncased")
+def get_dataset_and_tokenizer(dataset_name: str, max_length: int, backbone: str = "bert"):
+    """Load dataset and tokenizer. Supports 'mrpc', 'imdb', 'sst2', 'snli', 'xnli', 'tydiqa'.
+    backbone: 'bert' or 'xlmr'. Returns (train_ds, val_ds, tokenizer, num_labels, task_type)."""
+    if backbone == "xlmr":
+        from transformers import XLMRobertaTokenizerFast
+        tokenizer = XLMRobertaTokenizerFast.from_pretrained("xlm-roberta-base")
+    else:
+        tokenizer = BertTokenizer.from_pretrained("bert-base-uncased")
 
     if dataset_name == "mrpc":
         ds = load_dataset("glue", "mrpc")
@@ -117,10 +154,24 @@ def get_dataset_and_tokenizer(dataset_name: str, max_length: int):
             )
         num_labels = 3  # entailment (0), neutral (1), contradiction (2)
         task_type = "classification"
+    elif dataset_name == "xnli":
+        # XNLI: cross-lingual NLI (default English for training; can eval other langs later)
+        ds = load_dataset("xnli", "en")
+        def tokenize(ex):
+            return tokenizer(
+                ex["premise"],
+                ex["hypothesis"],
+                padding="max_length",
+                truncation=True,
+                max_length=max_length,
+                return_tensors=None,
+            )
+        num_labels = 3  # entailment (0), neutral (1), contradiction (2)
+        task_type = "classification"
     elif dataset_name == "tydiqa":
         ds = load_dataset("tydiqa", "secondary_task")
         def prepare_tydiqa_batch(examples):
-            out = {"input_ids": [], "attention_mask": [], "token_type_ids": [], "start_positions": [], "end_positions": []}
+            out = {"input_ids": [], "attention_mask": [], "start_positions": [], "end_positions": []}
             for i in range(len(examples["id"])):
                 ex = {k: v[i] for k, v in examples.items()}
                 row = _prepare_tydiqa_example(ex, tokenizer, max_length)
@@ -128,7 +179,8 @@ def get_dataset_and_tokenizer(dataset_name: str, max_length: int):
                     continue
                 out["input_ids"].append(row["input_ids"])
                 out["attention_mask"].append(row["attention_mask"])
-                out["token_type_ids"].append(row["token_type_ids"])
+                if "token_type_ids" in row:
+                    out.setdefault("token_type_ids", []).append(row["token_type_ids"])
                 out["start_positions"].append(row["start_positions"])
                 out["end_positions"].append(row["end_positions"])
             return out
@@ -164,11 +216,14 @@ def get_dataset_and_tokenizer(dataset_name: str, max_length: int):
             if row is not None:
                 val_list.append(row)
         val_ds = Dataset.from_list(val_list)
-        train_ds.set_format("torch", columns=["input_ids", "attention_mask", "token_type_ids", "start_positions", "end_positions"])
-        val_ds.set_format("torch", columns=["input_ids", "attention_mask", "token_type_ids", "start_positions", "end_positions"])
+        qa_columns = ["input_ids", "attention_mask", "start_positions", "end_positions"]
+        if train_list and "token_type_ids" in train_list[0]:
+            qa_columns.insert(2, "token_type_ids")
+        train_ds.set_format("torch", columns=qa_columns)
+        val_ds.set_format("torch", columns=qa_columns)
         return train_ds, val_ds, tokenizer, None, "qa"
     else:
-        raise ValueError(f"Unknown dataset: {dataset_name}. Use mrpc, imdb, sst2, snli, or tydiqa.")
+        raise ValueError(f"Unknown dataset: {dataset_name}. Use mrpc, imdb, sst2, snli, xnli, or tydiqa.")
 
     # Keep 'label' (and 'idx' if present)
     train_remove_cols = [c for c in ds["train"].column_names if c not in ("label", "idx")]
@@ -188,8 +243,10 @@ def get_dataset_and_tokenizer(dataset_name: str, max_length: int):
 
 def main():
     parser = argparse.ArgumentParser(description="Train MrBERT on a classification dataset")
-    parser.add_argument("--dataset", type=str, default="mrpc", choices=["mrpc", "imdb", "sst2", "snli", "tydiqa"],
-                        help="Dataset: mrpc, imdb, sst2, snli, or tydiqa")
+    parser.add_argument("--dataset", type=str, default="mrpc", choices=["mrpc", "imdb", "sst2", "snli", "xnli", "tydiqa"],
+                        help="Dataset: mrpc, imdb, sst2, snli, xnli, or tydiqa")
+    parser.add_argument("--backbone", type=str, default="bert", choices=["bert", "xlmr"],
+                        help="Backbone: bert (MrBERT) or xlmr (MrXLM / XLM-R). QA only supported with bert.")
     parser.add_argument("--max_length", type=int, default=128, help="Max sequence length")
     parser.add_argument("--batch_size", type=int, default=16, help="Train batch size")
     parser.add_argument("--epochs", type=int, default=3, help="Number of epochs")
@@ -256,7 +313,7 @@ def main():
                 except Exception:
                     return False
 
-        log_fh = log_path.open("w", buffering=1, encoding="utf-8")
+        log_fh = log_path.open("a", buffering=1, encoding="utf-8")
         sys.stdout = _Tee(sys.stdout, log_fh)
         sys.stderr = _Tee(sys.stderr, log_fh)
         print(f"[LOG] Writing detailed logs to {log_path}")
@@ -272,9 +329,11 @@ def main():
         except ImportError:
             print("Warning: wandb not installed; run pip install wandb to enable logging.")
 
-    print(f"Loading dataset: {args.dataset}")
+    print(f"Loading dataset: {args.dataset} (backbone={args.backbone})")
 
-    train_ds, val_ds, tokenizer, num_labels, task_type = get_dataset_and_tokenizer(args.dataset, args.max_length)
+    train_ds, val_ds, tokenizer, num_labels, task_type = get_dataset_and_tokenizer(
+        args.dataset, args.max_length, backbone=args.backbone
+    )
     if args.max_train_samples is not None:
         train_ds = train_ds.select(range(min(args.max_train_samples, len(train_ds))))
         print(f"Using first {len(train_ds)} train samples (--max_train_samples)")
@@ -282,7 +341,21 @@ def main():
     val_loader = DataLoader(val_ds, batch_size=args.batch_size)
 
     is_qa = task_type == "qa"
-    if is_qa:
+    if args.backbone == "xlmr":
+        if is_qa:
+            model = MrXLMRobertaForQuestionAnswering.from_pretrained_xlm(
+                "xlm-roberta-base",
+                gate_layer_index=3,
+                gate_k=-30.0,
+            )
+        else:
+            model = MrXLMRobertaForSequenceClassification.from_pretrained_xlm(
+                "xlm-roberta-base",
+                num_labels=num_labels,
+                gate_layer_index=3,
+                gate_k=-30.0,
+            )
+    elif is_qa:
         model = MrBertForQuestionAnswering.from_bert_pretrained(
             "bert-base-uncased",
             gate_layer_index=3,
@@ -301,8 +374,9 @@ def main():
     if args.log_level >= 1:
         from mrbert.diagnostics import log_parameter_summary
         log_parameter_summary(model, label="MrBERT" if (args.gate_weight != 0 or args.use_pi) else "Baseline BERT")
-        if hasattr(model, "mrbert") and hasattr(model.mrbert, "config"):
-            gl = getattr(model.mrbert.config, "gate_layer_index", None)
+        encoder = getattr(model, "mrbert", None) or getattr(model, "mrxlm", None)
+        if encoder is not None and hasattr(encoder, "config"):
+            gl = getattr(encoder.config, "gate_layer_index", None)
             if gl is not None:
                 print(f"[MrBERT] Gate placement: Layer {gl}")
     optimizer = torch.optim.AdamW(model.parameters(), lr=args.lr)
@@ -519,12 +593,13 @@ def main():
         val_acc = correct / total if total else 0.0
         print(f"Validation accuracy: {val_acc:.4f} ({correct}/{total})")
 
-    if args.log_level >= 3 and hasattr(model, "mrbert") and getattr(model.mrbert, "delete_gate", None) is not None:
+    encoder = getattr(model, "mrbert", None) or getattr(model, "mrxlm", None)
+    if args.log_level >= 3 and encoder is not None and getattr(encoder, "delete_gate", None) is not None:
         from mrbert.diagnostics import print_dropped_token_summary
         first_batch = next(iter(val_loader))
         inp = {k: v.to(device) if hasattr(v, "to") else v for k, v in first_batch.items()}
-        old_log_shapes = getattr(model.mrbert.config, "log_shapes", False)
-        model.mrbert.config.log_shapes = True
+        old_log_shapes = getattr(encoder.config, "log_shapes", False)
+        encoder.config.log_shapes = True
         with torch.no_grad():
             out = model(
                 input_ids=inp["input_ids"],
@@ -543,7 +618,7 @@ def main():
                 batch_index=0,
                 max_show=25,
             )
-        model.mrbert.config.log_shapes = old_log_shapes
+        encoder.config.log_shapes = old_log_shapes
 
     # Inference-time benchmark: forward-only, no backward (eval mode + no_grad)
     model.eval()
@@ -638,6 +713,7 @@ def main():
         Path(args.output_result).parent.mkdir(parents=True, exist_ok=True)
         row = {
             "dataset": args.dataset,
+            "backbone": args.backbone,
             "gate_weight": args.gate_weight,
             "use_pi": args.use_pi,
             "target_deletion": args.target_deletion,

@@ -305,3 +305,154 @@ class MrXLMRobertaModel(XLMRobertaModel):
 
         return model_output
 
+
+class MrXLMRobertaForSequenceClassification(nn.Module):
+    """XLM-R with delete gate and a classification head (for NLI, sentiment, etc.)."""
+
+    def __init__(self, config: XLMRobertaConfig, num_labels: int = 2):
+        super().__init__()
+        self.config = config
+        self.num_labels = num_labels
+        self.mrxlm = MrXLMRobertaModel(config)
+        self.dropout = nn.Dropout(config.hidden_dropout_prob)
+        self.classifier = nn.Linear(config.hidden_size, num_labels)
+
+    @classmethod
+    def from_pretrained_xlm(
+        cls,
+        pretrained_name_or_path: str,
+        num_labels: int = 2,
+        *,
+        gate_layer_index: int = 3,
+        gate_k: float = -30.0,
+        **kwargs,
+    ) -> "MrXLMRobertaForSequenceClassification":
+        """Load XLM-R weights and add MrXLM gate; classifier from XLMRobertaForSequenceClassification."""
+        from transformers import XLMRobertaForSequenceClassification as HFXLMRobertaForSequenceClassification
+
+        hf_model = HFXLMRobertaForSequenceClassification.from_pretrained(
+            pretrained_name_or_path, num_labels=num_labels, **kwargs
+        )
+        config = hf_model.config
+        config.gate_layer_index = gate_layer_index
+        config.gate_k = gate_k
+        config.gate_threshold_ratio = getattr(config, "gate_threshold_ratio", 0.5)
+
+        model = cls(config, num_labels=num_labels)
+        model.mrxlm.load_state_dict(hf_model.roberta.state_dict(), strict=False)
+        model.classifier.load_state_dict(hf_model.classifier.state_dict())
+        model.dropout.load_state_dict(hf_model.dropout.state_dict())
+        return model
+
+    def forward(
+        self,
+        input_ids: torch.Tensor | None = None,
+        attention_mask: torch.Tensor | None = None,
+        token_type_ids: torch.Tensor | None = None,
+        labels: torch.Tensor | None = None,
+        gate_regularizer_weight: float = 0.0,
+        **kwargs,
+    ):
+        result = self.mrxlm.forward(
+            input_ids=input_ids,
+            attention_mask=attention_mask,
+            token_type_ids=token_type_ids,
+            return_gate=True,
+            use_soft_deletion=self.training,
+            **kwargs,
+        )
+        if isinstance(result, tuple):
+            outputs, gate = result
+        else:
+            outputs, gate = result, None
+        pooler_output = outputs.pooler_output if hasattr(outputs, "pooler_output") else outputs[1]
+        logits = self.classifier(self.dropout(pooler_output))
+        loss_ce = None
+        if labels is not None:
+            loss_ce = nn.functional.cross_entropy(logits, labels)
+        loss_gate = self.mrxlm.get_gate_regularizer_loss(gate) * gate_regularizer_weight if gate is not None else None
+        loss = (loss_ce + loss_gate) if (loss_ce is not None and loss_gate is not None) else (loss_ce if loss_ce is not None else None)
+        return dict(loss=loss, logits=logits, gate=gate, loss_ce=loss_ce, loss_gate=loss_gate)
+
+
+class MrXLMRobertaForQuestionAnswering(nn.Module):
+    """XLM-R with delete gate and a span (QA) head for extractive QA (e.g. TyDi QA)."""
+
+    def __init__(self, config: XLMRobertaConfig):
+        super().__init__()
+        self.config = config
+        self.mrxlm = MrXLMRobertaModel(config)
+        self.qa_outputs = nn.Linear(config.hidden_size, 2)  # start and end logits per token
+
+    @classmethod
+    def from_pretrained_xlm(
+        cls,
+        pretrained_name_or_path: str,
+        *,
+        gate_layer_index: int = 3,
+        gate_k: float = -30.0,
+        gate_threshold_ratio: float = 0.5,
+        **kwargs,
+    ) -> "MrXLMRobertaForQuestionAnswering":
+        """Load XLM-R weights and add MrXLM gate; QA head from XLMRobertaForQuestionAnswering."""
+        from transformers import XLMRobertaForQuestionAnswering as HFXLMRobertaForQuestionAnswering
+
+        hf_qa = HFXLMRobertaForQuestionAnswering.from_pretrained(pretrained_name_or_path, **kwargs)
+        config = hf_qa.config
+        config.gate_layer_index = gate_layer_index
+        config.gate_k = gate_k
+        config.gate_threshold_ratio = gate_threshold_ratio
+
+        model = cls(config)
+        model.mrxlm.load_state_dict(hf_qa.roberta.state_dict(), strict=False)
+        model.qa_outputs.load_state_dict(hf_qa.qa_outputs.state_dict())
+        return model
+
+    def forward(
+        self,
+        input_ids: torch.Tensor | None = None,
+        attention_mask: torch.Tensor | None = None,
+        token_type_ids: torch.Tensor | None = None,
+        start_positions: torch.Tensor | None = None,
+        end_positions: torch.Tensor | None = None,
+        gate_regularizer_weight: float = 0.0,
+        **kwargs,
+    ):
+        result = self.mrxlm.forward(
+            input_ids=input_ids,
+            attention_mask=attention_mask,
+            token_type_ids=token_type_ids,
+            return_gate=True,
+            use_soft_deletion=self.training,
+            **kwargs,
+        )
+        if isinstance(result, tuple):
+            outputs, gate = result
+        else:
+            outputs, gate = result, None
+        keep_indices = getattr(outputs, "keep_indices", None)
+        kept_lengths = getattr(outputs, "kept_lengths", None)
+        sequence_output = outputs.last_hidden_state if hasattr(outputs, "last_hidden_state") else outputs[0]
+        logits = self.qa_outputs(sequence_output)  # (batch, seq_len, 2)
+        start_logits = logits[:, :, 0]
+        end_logits = logits[:, :, 1]
+        loss_ce = None
+        if start_positions is not None and end_positions is not None:
+            loss_fct = nn.CrossEntropyLoss(ignore_index=-100)
+            start_loss = loss_fct(start_logits, start_positions)
+            end_loss = loss_fct(end_logits, end_positions)
+            loss_ce = (start_loss + end_loss) / 2
+        loss_gate = self.mrxlm.get_gate_regularizer_loss(gate) * gate_regularizer_weight if gate is not None else None
+        loss = (loss_ce + loss_gate) if (loss_ce is not None and loss_gate is not None) else (loss_ce if loss_ce is not None else None)
+        out = dict(
+            loss=loss,
+            start_logits=start_logits,
+            end_logits=end_logits,
+            gate=gate,
+            loss_ce=loss_ce,
+            loss_gate=loss_gate,
+        )
+        if keep_indices is not None:
+            out["keep_indices"] = keep_indices
+            out["kept_lengths"] = kept_lengths
+        return out

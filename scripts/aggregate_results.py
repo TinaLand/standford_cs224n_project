@@ -49,18 +49,19 @@ def main():
         dataset = r["dataset"]
         gw = r["gate_weight"]
         use_pi = r.get("use_pi", False)
+        backbone = r.get("backbone", "bert")
         acc = r["val_acc"]
         avg_loss = r.get("avg_train_loss")
         actual_del = r.get("actual_deletion_rate")
         duration = r.get("duration_sec")
         alpha = r.get("alpha_final")
         if gw == 0:
-            model = "Baseline BERT"
+            model = "Baseline XLM-R" if backbone == "xlmr" else "Baseline BERT"
             deletion = "0%"
         else:
-            model = "MrBERT"
+            model = "MrXLM (XLM-R)" if backbone == "xlmr" else "MrBERT"
             deletion = "~50%" if use_pi else f"gw={gw}"
-        key = (model.lower().split()[0], dataset)
+        key = (model, dataset)
         if key not in seen:
             seen.add(key)
             actual_str = _fmt(actual_del) if actual_del is not None else "—"
@@ -84,7 +85,13 @@ def main():
     lines.append("")
     if LATENCY_FILE.exists():
         with open(LATENCY_FILE) as f:
-            lat = json.load(f)
+            raw = f.read().strip()
+        # Support both single JSON (legacy pretty-printed) and JSONL (append mode: use latest line)
+        try:
+            lat = json.loads(raw)
+        except json.JSONDecodeError:
+            lines = [ln for ln in raw.split("\n") if ln.strip()]
+            lat = json.loads(lines[-1]) if lines else {}
         lines.append("| Setting | Seq length | Avg time (ms) |")
         lines.append("|---------|------------|---------------|")
         lines.append(f"| Baseline BERT | {lat.get('seq_len_original', '—')} | {lat.get('baseline_ms', '—')} |")

@@ -33,6 +33,8 @@ def log_parameter_summary(model: Module, label: str = "MrBERT") -> dict[str, int
     gate_params = 0
     if hasattr(model, "mrbert") and hasattr(model.mrbert, "delete_gate"):
         gate_params, _ = count_parameters(model.mrbert.delete_gate)
+    elif hasattr(model, "mrxlm") and hasattr(model.mrxlm, "delete_gate"):
+        gate_params, _ = count_parameters(model.mrxlm.delete_gate)
     elif hasattr(model, "delete_gate"):
         gate_params, _ = count_parameters(model.delete_gate)
     out = {"total": total, "trainable": trainable, "gate_params": gate_params}
