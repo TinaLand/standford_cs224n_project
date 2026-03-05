@@ -6,6 +6,11 @@ Only runs XLM-R / MrXLM (no BERT). Results are written to a Modal Volume.
 Usage (from project root):
   modal run run_xlmr_modal.py
 
+WandB charts (optional):
+  Without WANDB_API_KEY in the container, WandB runs offline and no charts appear.
+  To get charts: 1) modal secret create wandb-api-key WANDB_API_KEY=<your_key>
+  2) Uncomment the secrets= line in @app.function below, then re-run.
+
 Same controls as BERT (run_experiments.sh):
   MR_TARGET_DEL=0.5, MR_USE_PI=1, EPOCHS=3, BATCH=8, LOG_LEVEL=1, GATE_WARMUP_STEPS=0
 
@@ -57,6 +62,8 @@ volume = modal.Volume.from_name("xlmr-results", create_if_missing=True)
     gpu="A100",
     timeout=86400,  # 24h max
     volumes={"/vol/results": volume},
+    # Uncomment next line so the container gets WANDB_API_KEY and WandB logs online:
+    secrets=[modal.Secret.from_name("wandb-api-key")],
 )
 def run_xlmr_experiments(
     epochs: int = 3,
