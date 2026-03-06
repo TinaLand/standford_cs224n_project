@@ -1,0 +1,1 @@
+{"baseline_ms": 95.24, "mrbert_ms": 42.67, "speedup_pct": 55.2, "seq_len_original": 256, "seq_len_soft": 256, "seq_len_hard": 4, "batch_size": 16, "steps": 50, "device": "cuda"}
