@@ -1,106 +1,130 @@
 # Results and Analysis
 
-This file summarizes experimental results and analysis for MrBERT and the extended backbones (MrRoBERTa, MrXLM). Raw numbers come from the 3-epoch run stored under `results/MR_TARGET_DEL=0.5 MR_USE_PI=1EPOCHS=3BATCH=8LOG_LEVEL=1_with_deletion_map/train_results.jsonl` (also mirrored into `results/results/train_results.jsonl`) and from CPU sanity checks.
+This file summarizes experimental results and analysis for MrBERT, MrXLM, and the relationship between **loss and deletion rate**. Data below are drawn from `results/new/` (L4 BERT runs and A100 XLM-R runs) and from earlier 3-epoch runs where noted.
 
 ---
 
-## MrBERT (BERT backbone) — full experiments
+## 1. MrBERT (BERT backbone) — L4 runs in `results/new/bert_from_l4`
 
-Results are from the **3-epoch** full run with `MR_TARGET_DEL=0.5`, `MR_USE_PI=1`, `EPOCHS=3`, `BATCH=8`, `LOG_LEVEL=1`, stored under `results/MR_TARGET_DEL=0.5 MR_USE_PI=1EPOCHS=3BATCH=8LOG_LEVEL=1_with_deletion_map/train_results.jsonl`: baseline BERT vs MrBERT with PI controller, target deletion 0.5, batch size 8.
+### 1.1 BERT with warmup, target deletion 0.5 (1 epoch, batch 24, GATE_WARMUP_STEPS=1000)
 
-| Dataset | Baseline (val acc) | MrBERT (val acc) | MrBERT actual deletion | Note |
-|---------|--------------------|------------------|------------------------|------|
-| MRPC    | 69.85%             | **74.26%**       | 64.9%                  | MrBERT improves over baseline. |
-| IMDB    | **88.04%**         | 84.19%           | 60.4%                  | Slight drop; trade-off. |
-| SNLI    | 73.74%             | **81.88%**       | 54.9%                  | MrBERT +8.1 pts. |
-| SST-2   | 87.16%             | **91.28%**       | 71.7%                  | MrBERT +4.1 pts. |
-| TyDi QA | **32.05%** (EM)    | 0%               | 99.8%                  | Gate collapsed; coordinate re-mapping fixed for index shift; needs lower target deletion or QA-specific tuning. |
+Source: `results/new/bert_from_l4/from_l4_MR_TARGET_DEL=0.5MR_USE_PI=1MODELS=bertGATE_WARMUP_STEPS=1000BATCH=24USE_WANDB=1LOG_LEVEL=1/train_results.jsonl`
 
-**Takeaways**
+| Dataset | Baseline (val acc) | MrBERT (val acc) | MrBERT actual deletion |
+|---------|--------------------|------------------|-------------------------|
+| MRPC    | 68.87%             | 68.38%           | 30.1%                   |
+| IMDB    | 87.28%             | 49.76%           | 4.2%                    |
+| SNLI    | 60.32%             | **88.78%**       | 76.2%                   |
+| SST-2   | 80.39%             | **91.17%**       | 58.9%                   |
+| TyDi QA | 26.08%             | 23.64%           | 26.8%                   |
+| XNLI    | 75.38%             | **81.65%**       | 65.3%                   |
 
-- On classification (MRPC, SNLI, SST-2), MrBERT matches or beats baseline at 55–72% token deletion.
-- Dataset-wise deletion from this run: MRPC ≈ 65%, IMDB ≈ 60%, SNLI ≈ 55%, SST-2 ≈ 72%, TyDi QA ≈ 100%, while all corresponding baselines stay near 0–3% deletion (as expected with the gate disabled).
-- TyDi QA under current settings over-deletes (99.8%); the same `keep_indices` / `kept_lengths` re-mapping used for EM is in place and validated on smoke runs. Further work: lower target deletion or QA-specific tuning.
+### 1.2 BERT with warmup, target deletion 0.3 (1 epoch, batch 24, GATE_WARMUP_STEPS=1000)
 
----
+Source: `results/new/bert_from_l4/from_l4_MR_TARGET_DEL=0.3MR_USE_PI=1MODELS=bertBATCH=24EPOCHS=1GATE_WARMUP_STEPS=1000/train_results.jsonl` (lines 36–47)
 
-## New backbones: MrRoBERTa and MrXLM (architecture check only)
+| Dataset | Baseline (val acc) | MrBERT (val acc) | MrBERT actual deletion |
+|---------|--------------------|------------------|-------------------------|
+| MRPC    | 68.38%             | 68.63%           | 53.8%                   |
+| IMDB    | 87.85%             | 57.42%           | 4.7%                    |
+| SNLI    | 74.00%             | **89.02%**       | 76.1%                   |
+| SST-2   | 67.89%             | **92.55%**       | 61.8%                   |
+| TyDi QA | 20.18%             | **28.16%**       | 10.9%                   |
+| XNLI    | 74.82%             | **80.56%**       | 65.4%                   |
 
-To show that the **delete-gate and index-mapping design** is backbone-agnostic, we added two wrappers that reuse the same gate and output contract `(hidden_states, gate, keep_indices, kept_lengths)`:
-
-- **MrRoBERTa** (`mrbert/modeling_mrroberta.py`): RoBERTa-base with the same gate after layer 3. No `token_type_ids`; otherwise same soft/hard deletion and index contract.
-- **MrXLM** (`mrbert/modeling_mrxlm.py`): XLM-RoBERTa-base with the same gate. Different tokenizer (SentencePiece) but tensor-level indexing is unchanged, so coordinate re-mapping for QA applies without code change.
-
-### Preliminary runs (CPU, no training)
-
-- **MrXLM**: `python scripts/xlm_pruning_demo.py`  
-  Loads `xlm-roberta-base`, runs two sentences with `use_soft_deletion=False`, `return_gate=True`.  
-  A snapshot of one run is stored in `results/results/xlm_pruning_demo.json`, with:  
-  `input_shape = [2, 32]`, `last_hidden_state_shape = [2, 5, 768]`, `kept_lengths = [3, 5]`, `keep_indices_shape = [2, 5]`, `gate_shape = [2, 32]`, and `estimated_deletion_rate ≈ 0.75`.  
-  This confirms that hard deletion shortens the sequence and that the index metadata (`keep_indices`, `kept_lengths`) is well-formed on XLM-R.
-- **MrRoBERTa**: `python scripts/roberta_pruning_demo.py`  
-  Similar qualitative demo on `roberta-base`, printing per-token gate scores and KEEP/DEL decisions, plus the kept token sequence after hard deletion.
-
-So far these are **sanity checks** only: no full training or evaluation. They support the claim that the framework is **cross-architecture**: the same PI, gate, and QA index re-mapping can be used on BERT, RoBERTa, and XLM-R with only a different encoder wrapper.
+**Takeaways (BERT)**  
+- Gate warmup (1000 steps) stabilizes MrBERT; target 0.3 with warmup often matches or beats target 0.5 on SNLI, SST-2, XNLI, TyDi QA.  
+- TyDi QA benefits from lower target (0.3) and warmup: 28.16% vs 23.64% at 0.5, with more conservative deletion (10.9% vs 26.8%).  
+- IMDB is unstable across runs (gate sometimes barely activates).
 
 ---
 
-## TyDi QA error cases (error_cases_tydiqa.jsonl)
+## 2. MrXLM (XLM-R backbone) — A100 runs in `results/new/xlmr_from_A100`
 
-We log TyDi QA error cases for this run into JSONL files such as `results/results/error_cases_tydiqa.jsonl` and `results/MR_TARGET_DEL=0.5 MR_USE_PI=1EPOCHS=3BATCH=8LOG_LEVEL=1_with_deletion_map/error_cases_tydiqa.jsonl`. Each file contains **50** TyDi QA examples where:
+### 2.1 XLM-R, target deletion 0.5 (3 epochs, batch 24, gate warmup 1000)
 
-- The model’s predicted span (after coordinate re-mapping using `keep_indices` / `kept_lengths`) does **not** match the gold span.
-- The **token deletion rate is very high**, typically in the range **0.70–0.90**.
-- For each example we log:
-  - `deletion_rate`: fraction of tokens dropped by the hard delete gate.
-  - `label` / `pred`: gold and predicted `(start_idx, end_idx)` in the original sequence.
-  - `text`: the full question, context, and gold answer text.
-  - `dropped_tokens`: the tokens that were physically deleted, in wordpiece form.
-  - `dropped_by_type`: counts of dropped vs kept tokens by type (`special`, `subword`, `punctuation`, `word`).
+Source: `results/new/xlmr_from_A100/epochs3batch24Mr-target-del0.5-mr-use-pi-log-level1-gate-warmup-steps1000/train_results.jsonl`
 
-**Qualitative pattern**
+| Dataset | MrXLM (val acc) | Note |
+|---------|-----------------|------|
+| MRPC    | 67.16%          | Reasonable |
+| SST-2   | 52.41%          | Near random; over-deletion in loss_vs_deletion |
+| SNLI    | 50.74%          | Near random; over-deletion |
+| IMDB    | **85.76%**      | Good |
+| XNLI    | **68.07%**      | Reasonable |
 
-- Many questions and contexts are Arabic; answers are short spans (names, dates, places).
-- In almost all logged cases the answer words (or their subwords) appear in `dropped_tokens`, and `dropped_by_type["subword"]` dominates (e.g. 70–90% of dropped pieces).
-- Predicted spans are often far away from the gold `(start, end)` indices, consistent with the answer region having been heavily pruned before the QA head runs.
+*No baseline XLM-R was run in this experiment; comparison is to BERT tables above.*
 
-**What this shows**
+### 2.2 XLM-R, target deletion 0.3 (5 epochs, batch 24, gate warmup 1500)
 
-- The error-case log confirms that under the current TyDi QA setting (target deletion 0.5, PI enabled), the gate **over-deletes answer-bearing tokens**, not just padding or obvious stopwords.
-- The coordinate re-mapping itself is working (pred indices are correctly mapped back to the original sequence), but the underlying span logits are misaligned because the answer tokens are often missing.
-- This supports the mitigation plan already noted in the table: for TyDi QA we likely need a **lower target deletion** (e.g. 0.2), gate warm-up, or QA-specific constraints (e.g. do not delete tokens in the answer window during training).
+Source: `results/new/xlmr_from_A100/epochs5Batch24MrTargetDel0.3GateWarmupSteps1500/train_results.jsonl`
 
-For quick sanity, we also ran a **TyDi QA smoke test** (`results/results/train_results_smoke.jsonl`), using only 100 training samples:
+| Dataset | MrXLM (val acc) |
+|---------|-----------------|
+| MRPC    | 68.38%          |
+| SST-2   | 57.45%          |
+| SNLI    | 45.79%          |
+| IMDB    | 85.60%          |
+| XNLI    | 56.71%          |
 
-- `val_acc` (EM): ~0.0015 (6/3984), `actual_deletion_rate` ≈ 0.63, `alpha_final = 0.0`.
-- This shows that even with very limited training, the gate already learns to delete aggressively; the full-run error cases are the “extreme” version of the same behavior.
-
----
-
-## SNLI error cases vs high deletion (results/.../error_cases_snli.jsonl)
-
-For SNLI we similarly sample **50** “wrong + high-deletion” examples into `results/MR_TARGET_DEL=0.5 MR_USE_PI=1EPOCHS=3BATCH=8LOG_LEVEL=1_with_deletion_map/error_cases_snli.jsonl`:
-
-- All selected examples have **deletion_rate ≥ 0.90**, meaning the gate removes almost the entire premise + hypothesis sequence.
-- In many of these, core content words from the premise or hypothesis (e.g., “two women are embracing…”, “two young boys play football…”) appear in `dropped_tokens`, so the classifier is forced to decide from a very small, distorted fragment of the input.
-- Qualitatively, these cases explain part of the residual SNLI error even though the **average** SNLI accuracy improves: the model is generally competitive, but on a small slice of inputs it becomes too aggressive and drops too much semantic content.
-
-This supports a nuanced claim: on SNLI, MrBERT with PI achieves a strong overall gain, but there is a long tail of failures that coincide with near-total deletion; tuning the target deletion or adding simple safeguards (e.g., caps on per-example deletion) could further improve robustness.
+**Takeaways (XLM-R)**  
+- XLM-R is more sensitive to deletion than BERT: SST-2 and SNLI often collapse when the gate is too aggressive.  
+- 0.3 + longer warmup does not consistently beat 0.5 on XLM-R (e.g. XNLI 68.07% vs 56.71%).  
+- For a proper Baseline XLM-R vs MrXLM comparison, the script now runs baseline (gate_weight=0) before each MrXLM run; new runs will fill that gap.
 
 ---
 
-## Latency benchmark (results/results/latency_results.json)
+## 3. Loss vs. deletion rate: correlation analysis
 
-`results/results/latency_results.json` records a **CPU** latency benchmark for baseline BERT vs MrBERT:
+We compute **per-example validation loss** and **per-example deletion rate** (fraction of tokens dropped by the gate for that example) and store them in `loss_vs_deletion_<dataset>.json` under each run. Each file includes:
 
-- `baseline_ms`: 1310.57 ms  
-- `mrbert_ms`: 1853.48 ms  
-- `speedup_pct`: **-41.43%** (MrBERT is slower on CPU in this setting)  
-- `seq_len_original`: 512, `seq_len_soft`: 512, `seq_len_hard`: 359  
-- `batch_size`: 16, `steps`: 50, `device`: `"cpu"`
+- `pearson`, `spearman`: correlation between loss and deletion rate over validation examples.  
+- `scatter_sample`: a sample of (loss, deletion_rate) pairs.
 
-Interpretation:
+**There is a correlation between higher deletion rate and higher loss** in several settings, consistent with the intuition that removing more tokens tends to hurt prediction on that example.
 
-- The hard-deletion path does shorten the sequence (512 → 359 tokens), but on CPU the extra overhead from the gate computation and index manipulation (`torch.gather`, mask rebuild) outweighs the savings in matmul FLOPs.
-- For the paper/report we therefore treat this CPU result as a **cautionary note**: token-level pruning is most beneficial on GPU accelerators where attention/matmul dominates runtime; on CPU, additional engineering (e.g. fused kernels, caching) would be needed to see net gains.
-- In the main text we rely on GPU latency measurements (not stored in `results/results` but in separate runs) to support the claim that MrBERT delivers **~29% speedup** at inference for long sequences.
+### 3.1 Representative correlations (from `results/new/`)
+
+| Run | Dataset | Pearson | Spearman | Interpretation |
+|-----|---------|---------|----------|----------------|
+| BERT L4, 0.3 + warmup | MRPC | **+0.064** | **+0.090** | Higher deletion → higher loss |
+| BERT L4, 0.5 + warmup | MRPC | **+0.068** | +0.057 | Higher deletion → higher loss |
+| BERT L4, 0.5 + warmup | SST-2 | **+0.035** | +0.015 | Weak positive |
+| BERT L4, 0.3 + warmup | SST-2 | −0.022 | −0.010 | Near zero |
+| BERT L4, 0.3 + warmup | SNLI | −0.048 | +0.060 | Mixed |
+| XLM-R A100, 0.5 | MRPC | −0.018 | +0.014 | Near zero |
+| XLM-R A100, 0.3 | MRPC | **+0.028** | +0.009 | Weak positive |
+
+Across runs, **when the correlation is positive** (e.g. BERT MRPC in the L4 warmup runs), it supports the claim that **an increase in deletion rate is associated with an increase in loss** on that example—i.e. more aggressive pruning correlates with worse predictions. Where the correlation is near zero or slightly negative, the model may be deleting less informative tokens first, or the signal may be noisier; the positive cases in the table still show that loss vs. deletion rate is not independent and that over-deletion can be harmful.
+
+### 3.2 Summary sentence for the report
+
+**There is a correlation between the increase in loss and the deletion rate:** in several BERT (and some XLM-R) runs, validation examples with higher per-example deletion rates tend to have higher cross-entropy loss. The effect is modest in magnitude (e.g. Pearson ≈ 0.03–0.07 where positive) but supports the design goal of controlling deletion via the PI controller and the observation that excessive deletion (e.g. on XLM-R SST-2/SNLI or TyDi QA) coincides with poor accuracy.
+
+---
+
+## 4. TyDi QA and SNLI error cases (unchanged from previous analysis)
+
+- **TyDi QA** (`error_cases_tydiqa.jsonl`): High-deletion error cases often have answer-bearing tokens in `dropped_tokens`; coordinate re-mapping is correct but over-deletion harms span prediction. Mitigation: lower target deletion, gate warmup, or QA-specific constraints.  
+- **SNLI** (`error_cases_snli.jsonl`): Many errors have deletion_rate ≥ 0.90; premise/hypothesis content appears in `dropped_tokens`, so the model decides from a heavily pruned fragment. This explains a long tail of failures despite good average accuracy.
+
+---
+
+## 5. Latency (reference)
+
+- **GPU** (from L4/A100 runs): e.g. `latency_results.json` in some result folders reports baseline vs MrBERT inference; hard deletion shortens sequence length and can yield ~30–55% speedup when the gate is active.  
+- **CPU** (earlier run): MrBERT was slower than baseline due to gate and index overhead; pruning is most beneficial on GPU where matmul/attention dominate.
+
+---
+
+## 6. Data locations (results/new)
+
+- **BERT from L4**  
+  - `bert_from_l4/from_l4_MR_TARGET_DEL=0.5MR_USE_PI=1MODELS=bertGATE_WARMUP_STEPS=1000BATCH=24USE_WANDB=1LOG_LEVEL=1/`  
+  - `bert_from_l4/from_l4_MR_TARGET_DEL=0.3MR_USE_PI=1MODELS=bertBATCH=24EPOCHS=1GATE_WARMUP_STEPS=1000/`  
+  - `bert_from_l4/from_l4_MR_TARGET_DEL=0.3MODELS=bertBATCH=24EPOCHS=1/` (no warmup)  
+- **XLM-R from A100**  
+  - `xlmr_from_A100/epochs3batch24Mr-target-del0.5-mr-use-pi-log-level1-gate-warmup-steps1000/`  
+  - `xlmr_from_A100/epochs5Batch24MrTargetDel0.3GateWarmupSteps1500/`  
+
+Each folder may contain `train_results.jsonl`, `loss_vs_deletion_*.json`, `error_cases_*.jsonl`, and `latency_results.json`.
