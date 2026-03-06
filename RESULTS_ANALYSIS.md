@@ -94,8 +94,20 @@ We compute **per-example validation loss** and **per-example deletion rate** (fr
 | BERT L4, 0.3 + warmup | SNLI | −0.048 | +0.060 | Mixed |
 | XLM-R A100, 0.5 | MRPC | −0.018 | +0.014 | Near zero |
 | XLM-R A100, 0.3 | MRPC | **+0.028** | +0.009 | Weak positive |
+| XLM-R A100, 0.5 | SST-2 | −0.014 | +0.026 | Near zero |
+| XLM-R A100, 0.5 | SNLI | +0.028 | +0.012 | Weak positive |
+| XLM-R A100, 0.5 | XNLI | −0.046 | −0.084 | Slight negative (higher del → lower loss) |
+| XLM-R A100, 0.3 | SST-2 | −0.043 | −0.011 | Near zero / weak negative |
+| XLM-R A100, 0.3 | SNLI | −0.015 | −0.027 | Near zero |
+| XLM-R A100, 0.3 | XNLI | +0.005 | +0.007 | Near zero |
 
 Across runs, **when the correlation is positive** (e.g. BERT MRPC in the L4 warmup runs), it supports the claim that **an increase in deletion rate is associated with an increase in loss** on that example—i.e. more aggressive pruning correlates with worse predictions. Where the correlation is near zero or slightly negative, the model may be deleting less informative tokens first, or the signal may be noisier; the positive cases in the table still show that loss vs. deletion rate is not independent and that over-deletion can be harmful.
+
+**Why only these datasets?** The table is built from **existing** `loss_vs_deletion_<dataset>.json` files under `results/new/` (each contains `pearson` and `spearman`). Only (run, dataset) pairs that have such a file are included. The reason other datasets do not appear in the table is that there is **no** `loss_vs_deletion` file for them (i.e. no correlation data between loss and deletion rate), not that there is no training loss.
+
+- **IMDB**: `run_experiments.sh` does **not** call `analyze_loss_vs_deletion` for IMDB (only MRPC, SNLI, SST-2, XNLI, TyDi QA). So there are no IMDB correlation numbers unless the script is run manually for IMDB.
+- **TyDi QA**: The pipeline can produce `loss_vs_deletion_tydiqa.json`, but in the current `results/new/` snapshot there are **no** TyDi QA loss-vs-deletion files (e.g. those runs may have skipped the step or used different output paths). Adding TyDi QA to the table would require re-running the analysis step for TyDi QA and copying the file into the run folders.
+- **XNLI**: Present for **XLM-R** runs only in `results/new/` (see table above); BERT run folders in this snapshot do not contain `loss_vs_deletion_xnli.json`, so BERT–XNLI is not compared here.
 
 ### 3.2 Summary sentence for the report
 
@@ -103,10 +115,29 @@ Across runs, **when the correlation is positive** (e.g. BERT MRPC in the L4 warm
 
 ---
 
-## 4. TyDi QA and SNLI error cases (unchanged from previous analysis)
+## 4. TyDi QA and SNLI error cases
 
-- **TyDi QA** (`error_cases_tydiqa.jsonl`): High-deletion error cases often have answer-bearing tokens in `dropped_tokens`; coordinate re-mapping is correct but over-deletion harms span prediction. Mitigation: lower target deletion, gate warmup, or QA-specific constraints.  
-- **SNLI** (`error_cases_snli.jsonl`): Many errors have deletion_rate ≥ 0.90; premise/hypothesis content appears in `dropped_tokens`, so the model decides from a heavily pruned fragment. This explains a long tail of failures despite good average accuracy.
+Error cases are extracted by `scripts/extract_error_cases.py` (wrong prediction and `deletion_rate >= 0.7`). Below we use files under `results/new/` (e.g. BERT L4 run folders and XLM-R A100 folders).
+
+### 4.1 TyDi QA
+
+**Source (example):** `results/new/bert_from_l4/from_l4_MR_TARGET_DEL=0.3MODELS=bertBATCH=24EPOCHS=1/error_cases_tydiqa.jsonl`
+
+- **Count & deletion:** One run has 50 error cases; `deletion_rate` ranges 0.73–0.95, mean ≈ 0.86, median ≈ 0.87; **30%** of cases have `deletion_rate ≥ 0.90`.
+- **Answer-bearing tokens in `dropped_tokens`:** In many cases the gold answer span lies in context, but key subwords appear in `dropped_tokens`. Example (idx 2): question "ما عاصمة جورجيا؟" (What is the capital of Georgia?), answer "تبليسي" (Tbilisi); `dropped_tokens` include question/context subwords that precede or overlap the answer region (e.g. "ع", "##ا", "##م", "##ة", "ج", "##و", "##ر", "##ج", "##ي", "##ا"). Another (idx 5): answer "جيمس واط" (James Watt); the model predicted (0, 24) while gold is (45, 51); many context tokens are dropped so the span predictor sees a heavily pruned sequence.
+- **Coordinate re-mapping:** Start/end indices are re-mapped correctly to the *kept* token sequence; the issue is that when too many tokens are removed, the answer span can fall in the dropped region or the remaining context is insufficient for the model to localize the span.
+- **Mitigation:** Lower target deletion (e.g. 0.3), gate warmup, or QA-specific constraints (e.g. protect tokens in the context window that overlap the gold span during evaluation, or use a separate deletion budget for question vs context).
+
+### 4.2 SNLI
+
+**Source (example):** `results/new/bert_from_l4/from_l4_MR_TARGET_DEL=0.5MR_USE_PI=1MODELS=bertGATE_WARMUP_STEPS=1000BATCH=24USE_WANDB=1LOG_LEVEL=1/error_cases_snli.jsonl`
+
+- **Count & deletion:** 50 error cases in this file; many have `deletion_rate` in 0.82–0.95 (e.g. 0.90+ is common). Premise and hypothesis content frequently appear in `dropped_tokens`.
+- **Concrete examples:**
+  - Case (idx 1): premise "Two women are embracing while holding to go packages.", hypothesis "Two woman are holding packages." Label **entailment**, pred **contradiction**. `dropped_tokens` include "two", "women", "are", "to", "go", "packages", "woman", "are", "holding", "packages"—i.e. much of the premise/hypothesis is pruned, so the model decides from a small fragment and tends to predict contradiction.
+  - Case (idx 25): premise "A young boy in a field of flowers carrying a ball", hypothesis "boy in field". Label **entailment**, pred **contradiction**. Dropped: "a", "young", "boy", "in", "field", "carrying", "boy", "in", "field"; again key content is removed and the model fails to infer entailment.
+- **Pattern:** Many errors are **entailment → predicted contradiction** or **neutral → contradiction**; with deletion_rate ≥ 0.90, premise/hypothesis tokens are heavily dropped and the model often defaults to contradiction. This produces a long tail of failures despite good average accuracy.
+- **Mitigation:** Lower target deletion, longer gate warmup, or constraining deletion so that at least a minimum fraction of premise/hypothesis tokens is kept (e.g. in the NLI head).
 
 ---
 
