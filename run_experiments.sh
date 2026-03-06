@@ -145,22 +145,32 @@ if run_bert; then
 fi
 
 if run_xlmr; then
+  echo "=== 10a. Baseline XLM-R: MRPC ==="
+  python3 train_mrbert.py --dataset mrpc --backbone xlmr --epochs "$EPOCHS" --batch_size "$BATCH" --gate_weight 0.0 "${LOG_ARGS[@]}" "${WANDB_ARGS[@]}" "${WARMUP_ARGS[@]}" --output_result "$RESULTS_FILE" || echo "Baseline XLM-R MRPC failed"
   echo "=== 10b. MrXLM (XLM-R): MRPC ==="
   python3 train_mrbert.py --dataset mrpc --backbone xlmr --epochs "$EPOCHS" --batch_size "$BATCH" --gate_weight 1e-4 "${MR_PI_ARGS[@]}" "${LOG_ARGS[@]}" "${WANDB_ARGS[@]}" "${WARMUP_ARGS[@]}" --output_result "$RESULTS_FILE" || echo "MrXLM (XLM-R) MRPC failed"
 
   if [ "${SKIP_SST2:-0}" != "1" ]; then
-    echo "=== 10c. MrXLM (XLM-R): SST-2 ==="
+    echo "=== 10c. Baseline XLM-R: SST-2 ==="
+    python3 train_mrbert.py --dataset sst2 --backbone xlmr --epochs "$EPOCHS" --batch_size "$BATCH" --gate_weight 0.0 "${LOG_ARGS[@]}" "${WANDB_ARGS[@]}" "${WARMUP_ARGS[@]}" --output_result "$RESULTS_FILE" || echo "Baseline XLM-R SST-2 failed"
+    echo "=== 10c2. MrXLM (XLM-R): SST-2 ==="
     python3 train_mrbert.py --dataset sst2 --backbone xlmr --epochs "$EPOCHS" --batch_size "$BATCH" --gate_weight 1e-4 "${MR_PI_ARGS[@]}" "${LOG_ARGS[@]}" "${WANDB_ARGS[@]}" "${WARMUP_ARGS[@]}" --output_result "$RESULTS_FILE" || echo "MrXLM (XLM-R) SST-2 failed"
   fi
   if [ "${SKIP_SNLI:-0}" != "1" ]; then
-    echo "=== 10d. MrXLM (XLM-R): SNLI ==="
+    echo "=== 10d. Baseline XLM-R: SNLI ==="
+    python3 train_mrbert.py --dataset snli --backbone xlmr --epochs "$EPOCHS" --batch_size "$BATCH" --gate_weight 0.0 "${LOG_ARGS[@]}" "${WANDB_ARGS[@]}" "${WARMUP_ARGS[@]}" --output_result "$RESULTS_FILE" || echo "Baseline XLM-R SNLI failed"
+    echo "=== 10d2. MrXLM (XLM-R): SNLI ==="
     python3 train_mrbert.py --dataset snli --backbone xlmr --epochs "$EPOCHS" --batch_size "$BATCH" --gate_weight 1e-4 "${MR_PI_ARGS[@]}" "${LOG_ARGS[@]}" "${WANDB_ARGS[@]}" "${WARMUP_ARGS[@]}" --output_result "$RESULTS_FILE" || echo "MrXLM (XLM-R) SNLI failed"
   fi
-  echo "=== 10e. MrXLM (XLM-R): IMDB ==="
+  echo "=== 10e. Baseline XLM-R: IMDB ==="
+  python3 train_mrbert.py --dataset imdb --backbone xlmr --epochs "$EPOCHS" --batch_size "$BATCH" --gate_weight 0.0 "${LOG_ARGS[@]}" "${WANDB_ARGS[@]}" "${WARMUP_ARGS[@]}" --output_result "$RESULTS_FILE" || echo "Baseline XLM-R IMDB failed"
+  echo "=== 10e2. MrXLM (XLM-R): IMDB ==="
   python3 train_mrbert.py --dataset imdb --backbone xlmr --epochs "$EPOCHS" --batch_size "$BATCH" --gate_weight 1e-4 "${MR_PI_ARGS[@]}" "${LOG_ARGS[@]}" "${WANDB_ARGS[@]}" "${WARMUP_ARGS[@]}" --output_result "$RESULTS_FILE" || echo "MrXLM (XLM-R) IMDB failed"
 
   if [ "${SKIP_XNLI:-0}" != "1" ]; then
-    echo "=== 10f. MrXLM (XLM-R): XNLI (en) ==="
+    echo "=== 10f. Baseline XLM-R: XNLI (en) ==="
+    python3 train_mrbert.py --dataset xnli --backbone xlmr --epochs "$EPOCHS" --batch_size "$BATCH" --gate_weight 0.0 "${LOG_ARGS[@]}" "${WANDB_ARGS[@]}" "${WARMUP_ARGS[@]}" --output_result "$RESULTS_FILE" || echo "Baseline XLM-R XNLI failed"
+    echo "=== 10f2. MrXLM (XLM-R): XNLI (en) ==="
     python3 train_mrbert.py --dataset xnli --backbone xlmr --epochs "$EPOCHS" --batch_size "$BATCH" --gate_weight 1e-4 "${MR_PI_ARGS[@]}" "${LOG_ARGS[@]}" "${WANDB_ARGS[@]}" "${WARMUP_ARGS[@]}" --output_result "$RESULTS_FILE" || echo "MrXLM (XLM-R) XNLI failed"
   fi
   if [ "${SKIP_TYDIQA:-0}" != "1" ]; then
