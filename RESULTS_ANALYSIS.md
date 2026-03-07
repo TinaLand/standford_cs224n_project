@@ -32,10 +32,24 @@ Source: `results/new/bert_from_l4/from_l4_MR_TARGET_DEL=0.3MR_USE_PI=1MODELS=ber
 | TyDi QA | 20.18%             | **28.16%**       | 10.9%                   |
 | XNLI    | 74.82%             | **80.56%**       | 65.4%                   |
 
+### 1.3 BERT with warmup, target deletion 0.7 (1 epoch, batch 24, GATE_WARMUP_STEPS=1000)
+
+Source: `results/new/bert_from_l4/from_l4_MR_TARGET_DEL=0.7MR_USE_PI=1MODELS=bertBATCH=24EPOCHS=1GATE_WARMUP_STEPS=1000LOG_LEVEL=1USE_WANDB=1/results/train_results.jsonl`
+
+| Dataset | Baseline (val acc) | MrBERT 0.7 (val acc) | MrBERT 0.7 actual deletion |
+|---------|--------------------|----------------------|----------------------------|
+| MRPC    | 70.34%             | 32.84%               | 30.8%                      |
+| IMDB    | 88.42%             | 50.00%               | 12.2%                      |
+| SNLI    | 67.27%             | **87.79%**           | 78.2%                      |
+| SST-2   | 86.58%             | **90.48%**           | 57.7%                      |
+| TyDi QA | 24.45%             | **0.00%**            | 36.6%                      |
+| XNLI    | 66.31%             | **80.28%**           | 67.2%                      |
+
 **Takeaways (BERT)**  
 - Gate warmup (1000 steps) stabilizes MrBERT; target 0.3 with warmup often matches or beats target 0.5 on SNLI, SST-2, XNLI, TyDi QA.  
-- TyDi QA benefits from lower target (0.3) and warmup: 28.16% vs 23.64% at 0.5, with more conservative deletion (10.9% vs 26.8%).  
-- IMDB is unstable across runs (gate sometimes barely activates).
+- Increasing the target deletion to 0.7 is a mixed story: SNLI, SST-2 and XNLI still improve over baseline, but MRPC and IMDB degrade sharply and TyDi QA collapses to 0% accuracy, showing that very aggressive deletion is unsafe for QA and some classification tasks.  
+- IMDB remains unstable across runs (gate sometimes barely activates, and high-target runs can fail).
+- Within this 0.7 run, per-example loss–deletion correlations (from `loss_vs_deletion_mrpc.json`, `snli.json`, `sst2.json` under the same folder) are weak (e.g. MRPC Pearson ≈ 0.007, SNLI ≈ −0.019, SST-2 ≈ −0.041), suggesting that once deletion is this aggressive the model either learns to delete relatively uninformative tokens on SNLI/SST-2 or the signal becomes too noisy to show a clear monotonic trend.
 
 ---
 
