@@ -4,6 +4,13 @@ Yes — **GCP has GPU**. You create a VM with an NVIDIA GPU (e.g. T4) and run th
 
 ---
 
+# get running results
+modal volume get xlmr-results / ./modal_download
+
+# scp results
+modal volume get xlmr-results / "results/new/xlmr_from_A100/epochs3--batch 24--mr-target-del 0.3--mr-use-pi--log-level3gate-warmup-steps1500"
+
+
 ## Step 1: Check gcloud on your Mac
 
 You already have `gcloud` installed. In Terminal:
