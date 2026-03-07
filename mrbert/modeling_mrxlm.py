@@ -346,6 +346,7 @@ class MrXLMRobertaForSequenceClassification(nn.Module):
         *,
         gate_layer_index: int = 3,
         gate_k: float = -30.0,
+        gate_threshold_ratio: float = 0.5,
         **kwargs,
     ) -> "MrXLMRobertaForSequenceClassification":
         """Load XLM-R weights and add MrXLM gate; classifier from XLMRobertaForSequenceClassification."""
@@ -357,7 +358,7 @@ class MrXLMRobertaForSequenceClassification(nn.Module):
         config = hf_model.config
         config.gate_layer_index = gate_layer_index
         config.gate_k = gate_k
-        config.gate_threshold_ratio = getattr(config, "gate_threshold_ratio", 0.5)
+        config.gate_threshold_ratio = gate_threshold_ratio
 
         model = cls(config, num_labels=num_labels)
         model.mrxlm.load_state_dict(hf_model.roberta.state_dict(), strict=False)

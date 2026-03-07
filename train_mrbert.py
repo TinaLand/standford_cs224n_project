@@ -285,8 +285,14 @@ def main():
     parser.add_argument("--gate_weight", type=float, default=1e-4, help="Gate regularizer weight (alpha)")
     parser.add_argument("--use_pi", action="store_true", help="Use PI controller for target deletion ratio")
     parser.add_argument("--target_deletion", type=float, default=0.5, help="Target deletion ratio (for PI)")
+    parser.add_argument("--gate_layer_index", type=int, default=3,
+                        help="Encoder layer (0-based) after which the delete gate is applied. Higher = prune later (less speedup, often better accuracy for XLM-R).")
+    parser.add_argument("--gate_threshold_ratio", type=float, default=0.5,
+                        help="Hard-deletion threshold = gate_k * this (e.g. 0.5 => k/2). Higher = keep more tokens.")
     parser.add_argument("--gate_warmup_steps", type=int, default=0,
                         help="Gate warm-up: first N steps use gate_regularizer_weight=0 (gate computed but no deletion pressure). 0 = disabled.")
+    parser.add_argument("--controller_kp", type=float, default=0.5, help="PI controller P gain (default 0.5). Lower = slower alpha ramp.")
+    parser.add_argument("--controller_ki", type=float, default=1e-5, help="PI controller I gain (default 1e-5).")
     parser.add_argument("--phase1_steps", type=int, default=0,
                         help="Phase A: first N steps with --phase1_gate_weight (gate adaptation); 0 = disabled")
     parser.add_argument("--phase1_gate_weight", type=float, default=1e-3,
@@ -372,33 +378,39 @@ def main():
     val_loader = DataLoader(val_ds, batch_size=args.batch_size)
 
     is_qa = task_type == "qa"
+    gl = args.gate_layer_index
+    gtr = args.gate_threshold_ratio
     if args.backbone == "xlmr":
         if is_qa:
             model = MrXLMRobertaForQuestionAnswering.from_pretrained_xlm(
                 "xlm-roberta-base",
-                gate_layer_index=3,
+                gate_layer_index=gl,
                 gate_k=-30.0,
+                gate_threshold_ratio=gtr,
             )
         else:
             model = MrXLMRobertaForSequenceClassification.from_pretrained_xlm(
                 "xlm-roberta-base",
                 num_labels=num_labels,
-                gate_layer_index=3,
+                gate_layer_index=gl,
                 gate_k=-30.0,
+                gate_threshold_ratio=gtr,
             )
     elif is_qa:
         model = MrBertForQuestionAnswering.from_bert_pretrained(
             "bert-base-uncased",
-            gate_layer_index=3,
+            gate_layer_index=gl,
             gate_k=-30.0,
+            gate_threshold_ratio=gtr,
             attn_implementation="eager",
         )
     else:
         model = MrBertForSequenceClassification.from_bert_pretrained(
             "bert-base-uncased",
             num_labels=num_labels,
-            gate_layer_index=3,
+            gate_layer_index=gl,
             gate_k=-30.0,
+            gate_threshold_ratio=gtr,
             attn_implementation="eager",
         )
     model = model.to(device)
@@ -411,7 +423,7 @@ def main():
             if gl is not None:
                 print(f"[MrBERT] Gate placement: Layer {gl}")
     optimizer = torch.optim.AdamW(model.parameters(), lr=args.lr)
-    pi = PIController(target_ratio=args.target_deletion, kp=0.5, ki=1e-5) if args.use_pi else None
+    pi = PIController(target_ratio=args.target_deletion, kp=args.controller_kp, ki=args.controller_ki) if args.use_pi else None
     gate_regularizer_weight = args.gate_weight
 
     if use_wandb:

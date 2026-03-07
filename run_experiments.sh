@@ -74,6 +74,15 @@ else
   MR_PI_ARGS=()
 fi
 
+# Gate placement and threshold (XLM-R rescue: try GATE_LAYER_INDEX=6, GATE_THRESHOLD_RATIO=0.6)
+GATE_LAYER_INDEX=${GATE_LAYER_INDEX:-3}
+GATE_THRESHOLD_RATIO=${GATE_THRESHOLD_RATIO:-0.5}
+GATE_LAYER_ARGS=(--gate_layer_index "$GATE_LAYER_INDEX" --gate_threshold_ratio "$GATE_THRESHOLD_RATIO")
+# PI controller gains (XLM-R rescue: try CONTROLLER_KP=0.002, CONTROLLER_KI=5e-6)
+CONTROLLER_KP=${CONTROLLER_KP:-0.5}
+CONTROLLER_KI=${CONTROLLER_KI:-1e-5}
+CONTROLLER_ARGS=(--controller_kp "$CONTROLLER_KP" --controller_ki "$CONTROLLER_KI")
+
 # Gate warmup (Priority 1: rescue TyDi QA). Passed to train_mrbert.py for MrBERT runs.
 #   GATE_WARMUP_STEPS: first N steps alpha=0, then enable gate/PI (default 0 = off)
 #   PHASE1_STEPS, PHASE1_GATE_WEIGHT: optional phase with lighter gate pressure after warmup
@@ -86,13 +95,16 @@ if [ "${GATE_WARMUP_STEPS}" -gt 0 ]; then
   fi
   echo "=== GATE_WARMUP_STEPS=$GATE_WARMUP_STEPS (PI enabled after warmup) ==="
 fi
+if [ "${GATE_LAYER_INDEX}" != "3" ]; then
+  echo "=== GATE_LAYER_INDEX=$GATE_LAYER_INDEX (gate after layer $GATE_LAYER_INDEX) ==="
+fi
 
 if [ "${QUICK:-0}" = "1" ]; then
   echo "=== QUICK mode: GPU smoke test (MRPC 200 samples + latency) ==="
   python3 -c "import torch; print('CUDA:', torch.cuda.get_device_name(0) if torch.cuda.is_available() else 'No GPU')"
   echo ""
   python3 train_mrbert.py --dataset mrpc --epochs 1 --batch_size 8 --max_train_samples 200 \
-    --gate_weight 1e-4 "${MR_PI_ARGS[@]}" "${LOG_ARGS[@]}" "${WANDB_ARGS[@]}" "${WARMUP_ARGS[@]}" --output_result "$RESULTS_FILE"
+    --gate_weight 1e-4 "${MR_PI_ARGS[@]}" "${LOG_ARGS[@]}" "${WANDB_ARGS[@]}" "${WARMUP_ARGS[@]}" "${GATE_LAYER_ARGS[@]}" "${CONTROLLER_ARGS[@]}" --output_result "$RESULTS_FILE"
   python3 latency_benchmark.py --batch_size 16 --seq_length 256 --steps 20 --output_result results/latency_results.json
   echo "=== Aggregating results into RESULTS.md ==="
   python3 scripts/aggregate_results.py || echo "aggregate_results failed (QUICK mode)"
@@ -104,80 +116,80 @@ fi
 
 if run_bert; then
   echo "=== 1. Baseline BERT: MRPC ==="
-  python3 train_mrbert.py --dataset mrpc --epochs "$EPOCHS" --batch_size "$BATCH" --gate_weight 0.0 "${LOG_ARGS[@]}" "${WANDB_ARGS[@]}" "${WARMUP_ARGS[@]}" --output_result "$RESULTS_FILE"
+  python3 train_mrbert.py --dataset mrpc --epochs "$EPOCHS" --batch_size "$BATCH" --gate_weight 0.0 "${LOG_ARGS[@]}" "${WANDB_ARGS[@]}" "${WARMUP_ARGS[@]}" "${GATE_LAYER_ARGS[@]}" "${CONTROLLER_ARGS[@]}" --output_result "$RESULTS_FILE"
 
   echo "=== 2. Baseline BERT: IMDB ==="
-  python3 train_mrbert.py --dataset imdb --epochs "$EPOCHS" --batch_size "$BATCH" --gate_weight 0.0 "${LOG_ARGS[@]}" "${WANDB_ARGS[@]}" "${WARMUP_ARGS[@]}" --output_result "$RESULTS_FILE"
+  python3 train_mrbert.py --dataset imdb --epochs "$EPOCHS" --batch_size "$BATCH" --gate_weight 0.0 "${LOG_ARGS[@]}" "${WANDB_ARGS[@]}" "${WARMUP_ARGS[@]}" "${GATE_LAYER_ARGS[@]}" "${CONTROLLER_ARGS[@]}" --output_result "$RESULTS_FILE"
 
   echo "=== 3. MrBERT (~50% deletion): MRPC ==="
-  python3 train_mrbert.py --dataset mrpc --epochs "$EPOCHS" --batch_size "$BATCH" --gate_weight 1e-4 "${MR_PI_ARGS[@]}" "${LOG_ARGS[@]}" "${WANDB_ARGS[@]}" "${WARMUP_ARGS[@]}" --output_result "$RESULTS_FILE"
+  python3 train_mrbert.py --dataset mrpc --epochs "$EPOCHS" --batch_size "$BATCH" --gate_weight 1e-4 "${MR_PI_ARGS[@]}" "${LOG_ARGS[@]}" "${WANDB_ARGS[@]}" "${WARMUP_ARGS[@]}" "${GATE_LAYER_ARGS[@]}" "${CONTROLLER_ARGS[@]}" --output_result "$RESULTS_FILE"
 
   echo "=== 4. MrBERT (~50% deletion): IMDB ==="
-  python3 train_mrbert.py --dataset imdb --epochs "$EPOCHS" --batch_size "$BATCH" --gate_weight 1e-4 "${MR_PI_ARGS[@]}" "${LOG_ARGS[@]}" "${WANDB_ARGS[@]}" "${WARMUP_ARGS[@]}" --output_result "$RESULTS_FILE"
+  python3 train_mrbert.py --dataset imdb --epochs "$EPOCHS" --batch_size "$BATCH" --gate_weight 1e-4 "${MR_PI_ARGS[@]}" "${LOG_ARGS[@]}" "${WANDB_ARGS[@]}" "${WARMUP_ARGS[@]}" "${GATE_LAYER_ARGS[@]}" "${CONTROLLER_ARGS[@]}" --output_result "$RESULTS_FILE"
 
   if [ "${SKIP_SNLI:-0}" != "1" ]; then
     echo "=== 5. Baseline BERT: SNLI ==="
-    python3 train_mrbert.py --dataset snli --epochs "$EPOCHS" --batch_size "$BATCH" --gate_weight 0.0 "${LOG_ARGS[@]}" "${WANDB_ARGS[@]}" "${WARMUP_ARGS[@]}" --output_result "$RESULTS_FILE"
+    python3 train_mrbert.py --dataset snli --epochs "$EPOCHS" --batch_size "$BATCH" --gate_weight 0.0 "${LOG_ARGS[@]}" "${WANDB_ARGS[@]}" "${WARMUP_ARGS[@]}" "${GATE_LAYER_ARGS[@]}" "${CONTROLLER_ARGS[@]}" --output_result "$RESULTS_FILE"
     echo "=== 6. MrBERT: SNLI ==="
-    python3 train_mrbert.py --dataset snli --epochs "$EPOCHS" --batch_size "$BATCH" --gate_weight 1e-4 "${MR_PI_ARGS[@]}" "${LOG_ARGS[@]}" "${WANDB_ARGS[@]}" "${WARMUP_ARGS[@]}" --output_result "$RESULTS_FILE"
+    python3 train_mrbert.py --dataset snli --epochs "$EPOCHS" --batch_size "$BATCH" --gate_weight 1e-4 "${MR_PI_ARGS[@]}" "${LOG_ARGS[@]}" "${WANDB_ARGS[@]}" "${WARMUP_ARGS[@]}" "${GATE_LAYER_ARGS[@]}" "${CONTROLLER_ARGS[@]}" --output_result "$RESULTS_FILE"
   fi
 
   if [ "${SKIP_SST2:-0}" != "1" ]; then
     echo "=== 7. Baseline BERT: SST-2 ==="
-    python3 train_mrbert.py --dataset sst2 --epochs "$EPOCHS" --batch_size "$BATCH" --gate_weight 0.0 "${LOG_ARGS[@]}" "${WANDB_ARGS[@]}" "${WARMUP_ARGS[@]}" --output_result "$RESULTS_FILE"
+    python3 train_mrbert.py --dataset sst2 --epochs "$EPOCHS" --batch_size "$BATCH" --gate_weight 0.0 "${LOG_ARGS[@]}" "${WANDB_ARGS[@]}" "${WARMUP_ARGS[@]}" "${GATE_LAYER_ARGS[@]}" "${CONTROLLER_ARGS[@]}" --output_result "$RESULTS_FILE"
     echo "=== 8. MrBERT: SST-2 ==="
-    python3 train_mrbert.py --dataset sst2 --epochs "$EPOCHS" --batch_size "$BATCH" --gate_weight 1e-4 "${MR_PI_ARGS[@]}" "${LOG_ARGS[@]}" "${WANDB_ARGS[@]}" "${WARMUP_ARGS[@]}" --output_result "$RESULTS_FILE"
+    python3 train_mrbert.py --dataset sst2 --epochs "$EPOCHS" --batch_size "$BATCH" --gate_weight 1e-4 "${MR_PI_ARGS[@]}" "${LOG_ARGS[@]}" "${WANDB_ARGS[@]}" "${WARMUP_ARGS[@]}" "${GATE_LAYER_ARGS[@]}" "${CONTROLLER_ARGS[@]}" --output_result "$RESULTS_FILE"
   fi
 
   if [ "${SKIP_TYDIQA:-0}" != "1" ]; then
     echo "=== 9. Baseline BERT: TyDi QA ==="
-    python3 train_mrbert.py --dataset tydiqa --epochs "$EPOCHS" --batch_size "$BATCH" --max_length 256 --gate_weight 0.0 "${LOG_ARGS[@]}" "${WANDB_ARGS[@]}" "${WARMUP_ARGS[@]}" --output_result "$RESULTS_FILE"
+    python3 train_mrbert.py --dataset tydiqa --epochs "$EPOCHS" --batch_size "$BATCH" --max_length 256 --gate_weight 0.0 "${LOG_ARGS[@]}" "${WANDB_ARGS[@]}" "${WARMUP_ARGS[@]}" "${GATE_LAYER_ARGS[@]}" "${CONTROLLER_ARGS[@]}" --output_result "$RESULTS_FILE"
     echo "=== 10. MrBERT: TyDi QA ==="
-    python3 train_mrbert.py --dataset tydiqa --epochs "$EPOCHS" --batch_size "$BATCH" --max_length 256 --gate_weight 1e-4 "${MR_PI_ARGS[@]}" "${LOG_ARGS[@]}" "${WANDB_ARGS[@]}" "${WARMUP_ARGS[@]}" --output_result "$RESULTS_FILE"
+    python3 train_mrbert.py --dataset tydiqa --epochs "$EPOCHS" --batch_size "$BATCH" --max_length 256 --gate_weight 1e-4 "${MR_PI_ARGS[@]}" "${LOG_ARGS[@]}" "${WANDB_ARGS[@]}" "${WARMUP_ARGS[@]}" "${GATE_LAYER_ARGS[@]}" "${CONTROLLER_ARGS[@]}" --output_result "$RESULTS_FILE"
   fi
 
   if [ "${SKIP_XNLI:-0}" != "1" ]; then
     echo "=== 8b. Baseline BERT: XNLI (en) ==="
-    python3 train_mrbert.py --dataset xnli --epochs "$EPOCHS" --batch_size "$BATCH" --gate_weight 0.0 "${LOG_ARGS[@]}" "${WANDB_ARGS[@]}" "${WARMUP_ARGS[@]}" --output_result "$RESULTS_FILE"
+    python3 train_mrbert.py --dataset xnli --epochs "$EPOCHS" --batch_size "$BATCH" --gate_weight 0.0 "${LOG_ARGS[@]}" "${WANDB_ARGS[@]}" "${WARMUP_ARGS[@]}" "${GATE_LAYER_ARGS[@]}" "${CONTROLLER_ARGS[@]}" --output_result "$RESULTS_FILE"
     echo "=== 8c. MrBERT: XNLI (en) ==="
-    python3 train_mrbert.py --dataset xnli --epochs "$EPOCHS" --batch_size "$BATCH" --gate_weight 1e-4 "${MR_PI_ARGS[@]}" "${LOG_ARGS[@]}" "${WANDB_ARGS[@]}" "${WARMUP_ARGS[@]}" --output_result "$RESULTS_FILE"
+    python3 train_mrbert.py --dataset xnli --epochs "$EPOCHS" --batch_size "$BATCH" --gate_weight 1e-4 "${MR_PI_ARGS[@]}" "${LOG_ARGS[@]}" "${WANDB_ARGS[@]}" "${WARMUP_ARGS[@]}" "${GATE_LAYER_ARGS[@]}" "${CONTROLLER_ARGS[@]}" --output_result "$RESULTS_FILE"
   fi
 fi
 
 if run_xlmr; then
   echo "=== 10a. Baseline XLM-R: MRPC ==="
-  python3 train_mrbert.py --dataset mrpc --backbone xlmr --epochs "$EPOCHS" --batch_size "$BATCH" --gate_weight 0.0 "${LOG_ARGS[@]}" "${WANDB_ARGS[@]}" "${WARMUP_ARGS[@]}" --output_result "$RESULTS_FILE" || echo "Baseline XLM-R MRPC failed"
+  python3 train_mrbert.py --dataset mrpc --backbone xlmr --epochs "$EPOCHS" --batch_size "$BATCH" --gate_weight 0.0 "${LOG_ARGS[@]}" "${WANDB_ARGS[@]}" "${WARMUP_ARGS[@]}" "${GATE_LAYER_ARGS[@]}" "${CONTROLLER_ARGS[@]}" --output_result "$RESULTS_FILE" || echo "Baseline XLM-R MRPC failed"
   echo "=== 10b. MrXLM (XLM-R): MRPC ==="
-  python3 train_mrbert.py --dataset mrpc --backbone xlmr --epochs "$EPOCHS" --batch_size "$BATCH" --gate_weight 1e-4 "${MR_PI_ARGS[@]}" "${LOG_ARGS[@]}" "${WANDB_ARGS[@]}" "${WARMUP_ARGS[@]}" --output_result "$RESULTS_FILE" || echo "MrXLM (XLM-R) MRPC failed"
+  python3 train_mrbert.py --dataset mrpc --backbone xlmr --epochs "$EPOCHS" --batch_size "$BATCH" --gate_weight 1e-4 "${MR_PI_ARGS[@]}" "${LOG_ARGS[@]}" "${WANDB_ARGS[@]}" "${WARMUP_ARGS[@]}" "${GATE_LAYER_ARGS[@]}" "${CONTROLLER_ARGS[@]}" --output_result "$RESULTS_FILE" || echo "MrXLM (XLM-R) MRPC failed"
 
   if [ "${SKIP_SST2:-0}" != "1" ]; then
     echo "=== 10c. Baseline XLM-R: SST-2 ==="
-    python3 train_mrbert.py --dataset sst2 --backbone xlmr --epochs "$EPOCHS" --batch_size "$BATCH" --gate_weight 0.0 "${LOG_ARGS[@]}" "${WANDB_ARGS[@]}" "${WARMUP_ARGS[@]}" --output_result "$RESULTS_FILE" || echo "Baseline XLM-R SST-2 failed"
+    python3 train_mrbert.py --dataset sst2 --backbone xlmr --epochs "$EPOCHS" --batch_size "$BATCH" --gate_weight 0.0 "${LOG_ARGS[@]}" "${WANDB_ARGS[@]}" "${WARMUP_ARGS[@]}" "${GATE_LAYER_ARGS[@]}" "${CONTROLLER_ARGS[@]}" --output_result "$RESULTS_FILE" || echo "Baseline XLM-R SST-2 failed"
     echo "=== 10c2. MrXLM (XLM-R): SST-2 ==="
-    python3 train_mrbert.py --dataset sst2 --backbone xlmr --epochs "$EPOCHS" --batch_size "$BATCH" --gate_weight 1e-4 "${MR_PI_ARGS[@]}" "${LOG_ARGS[@]}" "${WANDB_ARGS[@]}" "${WARMUP_ARGS[@]}" --output_result "$RESULTS_FILE" || echo "MrXLM (XLM-R) SST-2 failed"
+    python3 train_mrbert.py --dataset sst2 --backbone xlmr --epochs "$EPOCHS" --batch_size "$BATCH" --gate_weight 1e-4 "${MR_PI_ARGS[@]}" "${LOG_ARGS[@]}" "${WANDB_ARGS[@]}" "${WARMUP_ARGS[@]}" "${GATE_LAYER_ARGS[@]}" "${CONTROLLER_ARGS[@]}" --output_result "$RESULTS_FILE" || echo "MrXLM (XLM-R) SST-2 failed"
   fi
   if [ "${SKIP_SNLI:-0}" != "1" ]; then
     echo "=== 10d. Baseline XLM-R: SNLI ==="
-    python3 train_mrbert.py --dataset snli --backbone xlmr --epochs "$EPOCHS" --batch_size "$BATCH" --gate_weight 0.0 "${LOG_ARGS[@]}" "${WANDB_ARGS[@]}" "${WARMUP_ARGS[@]}" --output_result "$RESULTS_FILE" || echo "Baseline XLM-R SNLI failed"
+    python3 train_mrbert.py --dataset snli --backbone xlmr --epochs "$EPOCHS" --batch_size "$BATCH" --gate_weight 0.0 "${LOG_ARGS[@]}" "${WANDB_ARGS[@]}" "${WARMUP_ARGS[@]}" "${GATE_LAYER_ARGS[@]}" "${CONTROLLER_ARGS[@]}" --output_result "$RESULTS_FILE" || echo "Baseline XLM-R SNLI failed"
     echo "=== 10d2. MrXLM (XLM-R): SNLI ==="
-    python3 train_mrbert.py --dataset snli --backbone xlmr --epochs "$EPOCHS" --batch_size "$BATCH" --gate_weight 1e-4 "${MR_PI_ARGS[@]}" "${LOG_ARGS[@]}" "${WANDB_ARGS[@]}" "${WARMUP_ARGS[@]}" --output_result "$RESULTS_FILE" || echo "MrXLM (XLM-R) SNLI failed"
+    python3 train_mrbert.py --dataset snli --backbone xlmr --epochs "$EPOCHS" --batch_size "$BATCH" --gate_weight 1e-4 "${MR_PI_ARGS[@]}" "${LOG_ARGS[@]}" "${WANDB_ARGS[@]}" "${WARMUP_ARGS[@]}" "${GATE_LAYER_ARGS[@]}" "${CONTROLLER_ARGS[@]}" --output_result "$RESULTS_FILE" || echo "MrXLM (XLM-R) SNLI failed"
   fi
   echo "=== 10e. Baseline XLM-R: IMDB ==="
-  python3 train_mrbert.py --dataset imdb --backbone xlmr --epochs "$EPOCHS" --batch_size "$BATCH" --gate_weight 0.0 "${LOG_ARGS[@]}" "${WANDB_ARGS[@]}" "${WARMUP_ARGS[@]}" --output_result "$RESULTS_FILE" || echo "Baseline XLM-R IMDB failed"
+  python3 train_mrbert.py --dataset imdb --backbone xlmr --epochs "$EPOCHS" --batch_size "$BATCH" --gate_weight 0.0 "${LOG_ARGS[@]}" "${WANDB_ARGS[@]}" "${WARMUP_ARGS[@]}" "${GATE_LAYER_ARGS[@]}" "${CONTROLLER_ARGS[@]}" --output_result "$RESULTS_FILE" || echo "Baseline XLM-R IMDB failed"
   echo "=== 10e2. MrXLM (XLM-R): IMDB ==="
-  python3 train_mrbert.py --dataset imdb --backbone xlmr --epochs "$EPOCHS" --batch_size "$BATCH" --gate_weight 1e-4 "${MR_PI_ARGS[@]}" "${LOG_ARGS[@]}" "${WANDB_ARGS[@]}" "${WARMUP_ARGS[@]}" --output_result "$RESULTS_FILE" || echo "MrXLM (XLM-R) IMDB failed"
+  python3 train_mrbert.py --dataset imdb --backbone xlmr --epochs "$EPOCHS" --batch_size "$BATCH" --gate_weight 1e-4 "${MR_PI_ARGS[@]}" "${LOG_ARGS[@]}" "${WANDB_ARGS[@]}" "${WARMUP_ARGS[@]}" "${GATE_LAYER_ARGS[@]}" "${CONTROLLER_ARGS[@]}" --output_result "$RESULTS_FILE" || echo "MrXLM (XLM-R) IMDB failed"
 
   if [ "${SKIP_XNLI:-0}" != "1" ]; then
     echo "=== 10f. Baseline XLM-R: XNLI (en) ==="
-    python3 train_mrbert.py --dataset xnli --backbone xlmr --epochs "$EPOCHS" --batch_size "$BATCH" --gate_weight 0.0 "${LOG_ARGS[@]}" "${WANDB_ARGS[@]}" "${WARMUP_ARGS[@]}" --output_result "$RESULTS_FILE" || echo "Baseline XLM-R XNLI failed"
+    python3 train_mrbert.py --dataset xnli --backbone xlmr --epochs "$EPOCHS" --batch_size "$BATCH" --gate_weight 0.0 "${LOG_ARGS[@]}" "${WANDB_ARGS[@]}" "${WARMUP_ARGS[@]}" "${GATE_LAYER_ARGS[@]}" "${CONTROLLER_ARGS[@]}" --output_result "$RESULTS_FILE" || echo "Baseline XLM-R XNLI failed"
     echo "=== 10f2. MrXLM (XLM-R): XNLI (en) ==="
-    python3 train_mrbert.py --dataset xnli --backbone xlmr --epochs "$EPOCHS" --batch_size "$BATCH" --gate_weight 1e-4 "${MR_PI_ARGS[@]}" "${LOG_ARGS[@]}" "${WANDB_ARGS[@]}" "${WARMUP_ARGS[@]}" --output_result "$RESULTS_FILE" || echo "MrXLM (XLM-R) XNLI failed"
+    python3 train_mrbert.py --dataset xnli --backbone xlmr --epochs "$EPOCHS" --batch_size "$BATCH" --gate_weight 1e-4 "${MR_PI_ARGS[@]}" "${LOG_ARGS[@]}" "${WANDB_ARGS[@]}" "${WARMUP_ARGS[@]}" "${GATE_LAYER_ARGS[@]}" "${CONTROLLER_ARGS[@]}" --output_result "$RESULTS_FILE" || echo "MrXLM (XLM-R) XNLI failed"
   fi
   if [ "${SKIP_TYDIQA:-0}" != "1" ]; then
     echo "=== 10g. Baseline XLM-R: TyDi QA ==="
-    python3 train_mrbert.py --dataset tydiqa --backbone xlmr --epochs "$EPOCHS" --batch_size "$BATCH" --max_length 256 --gate_weight 0.0 "${LOG_ARGS[@]}" "${WANDB_ARGS[@]}" "${WARMUP_ARGS[@]}" --output_result "$RESULTS_FILE" || echo "Baseline XLM-R TyDi QA failed"
+    python3 train_mrbert.py --dataset tydiqa --backbone xlmr --epochs "$EPOCHS" --batch_size "$BATCH" --max_length 256 --gate_weight 0.0 "${LOG_ARGS[@]}" "${WANDB_ARGS[@]}" "${WARMUP_ARGS[@]}" "${GATE_LAYER_ARGS[@]}" "${CONTROLLER_ARGS[@]}" --output_result "$RESULTS_FILE" || echo "Baseline XLM-R TyDi QA failed"
     echo "=== 10h. MrXLM (XLM-R): TyDi QA ==="
-    python3 train_mrbert.py --dataset tydiqa --backbone xlmr --epochs "$EPOCHS" --batch_size "$BATCH" --max_length 256 --gate_weight 1e-4 "${MR_PI_ARGS[@]}" "${LOG_ARGS[@]}" "${WANDB_ARGS[@]}" "${WARMUP_ARGS[@]}" --output_result "$RESULTS_FILE" || echo "MrXLM (XLM-R) TyDi QA failed"
+    python3 train_mrbert.py --dataset tydiqa --backbone xlmr --epochs "$EPOCHS" --batch_size "$BATCH" --max_length 256 --gate_weight 1e-4 "${MR_PI_ARGS[@]}" "${LOG_ARGS[@]}" "${WANDB_ARGS[@]}" "${WARMUP_ARGS[@]}" "${GATE_LAYER_ARGS[@]}" "${CONTROLLER_ARGS[@]}" --output_result "$RESULTS_FILE" || echo "MrXLM (XLM-R) TyDi QA failed"
   fi
 fi
 

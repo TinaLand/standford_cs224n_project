@@ -51,6 +51,19 @@ Source: `results/new/bert_from_l4/from_l4_MR_TARGET_DEL=0.7MR_USE_PI=1MODELS=ber
 - IMDB remains unstable across runs (gate sometimes barely activates, and high-target runs can fail).
 - Within this 0.7 run, per-example loss–deletion correlations (from `loss_vs_deletion_mrpc.json`, `snli.json`, `sst2.json` under the same folder) are weak (e.g. MRPC Pearson ≈ 0.007, SNLI ≈ −0.019, SST-2 ≈ −0.041), suggesting that once deletion is this aggressive the model either learns to delete relatively uninformative tokens on SNLI/SST-2 or the signal becomes too noisy to show a clear monotonic trend.
 
+### 1.4 BERT 0.3 without PI (ablation; 1 epoch, batch 24, GATE_WARMUP_STEPS=1000)
+
+Source: `results/new/bert_from_l4/MR_TARGET_DEL=0.3MR_USE_PI=0MODELS=bertBATCH=24EPOCHS=1GATE_WARMUP_STEPS=1000LOG_LEVEL=1USE_WANDB=1/results/train_results.jsonl`
+
+Gate is on (gate_weight=1e-4) but **PI controller is off** (use_pi=false), so α is fixed. This run completed MRPC and IMDB only in the no-PI block; baselines are from the same file (same run’s baseline block).
+
+| Dataset | Baseline (val acc) | MrBERT 0.3 no-PI (val acc) | MrBERT 0.3 no-PI actual deletion |
+|---------|--------------------|----------------------------|-----------------------------------|
+| MRPC    | 68.14%             | 69.36%                     | 67.8%                             |
+| IMDB    | 87.82%             | 86.20%                     | 2.7%                              |
+
+**Takeaway:** Without PI, the gate still deletes heavily on MRPC (67.8%) and accuracy is close to baseline; on IMDB the gate barely activates (2.7%) and accuracy stays high. This supports that the PI controller is needed to steer deletion toward a target and avoid either over-deletion (MRPC) or under-activation (IMDB).
+
 ---
 
 ## 2. MrXLM (XLM-R backbone) — A100 runs in `results/new/xlmr_from_A100`
@@ -81,10 +94,24 @@ Source: `results/new/xlmr_from_A100/epochs5Batch24MrTargetDel0.3GateWarmupSteps1
 | IMDB    | 85.60%          |
 | XNLI    | 56.71%          |
 
+### 2.3 XLM-R, target deletion 0.3 (3 epochs, batch 24, gate warmup 1500, log-level 3) — Modal A100
+
+Source: `results/new/xlmr_from_A100/epochs3--batch 24--mr-target-del 0.3--mr-use-pi--log-level3gate-warmup-steps1500/train_results.jsonl`
+
+This run has **baseline XLM-R** (gate_weight=0) and **MrXLM 0.3** (PI) for each dataset; no TyDi QA.
+
+| Dataset | Baseline (val acc) | MrXLM 0.3 (val acc) | Note |
+|---------|--------------------|---------------------|------|
+| MRPC    | 68.38%             | **72.06%**          | MrXLM improves |
+| SST-2   | 79.01%             | 61.01%              | Large drop with gate |
+| SNLI    | 33.82%             | 33.82%              | Both poor; no change |
+| IMDB    | 79.87%             | 50.00%              | Large drop |
+| XNLI    | 62.77%             | 43.41%              | Large drop |
+
 **Takeaways (XLM-R)**  
-- XLM-R is more sensitive to deletion than BERT: SST-2 and SNLI often collapse when the gate is too aggressive.  
-- 0.3 + longer warmup does not consistently beat 0.5 on XLM-R (e.g. XNLI 68.07% vs 56.71%).  
-- For a proper Baseline XLM-R vs MrXLM comparison, the script now runs baseline (gate_weight=0) before each MrXLM run; new runs will fill that gap.
+- XLM-R is more sensitive to deletion than BERT: SST-2, SNLI, IMDB, and XNLI often drop or stay near random when the gate is active; only MRPC improves (72% vs 68% baseline) in this 0.3 run.  
+- 0.3 + warmup 1500 does not fix the sensitivity: in this 3-epoch run, MrXLM 0.3 hurts SST-2, IMDB, and XNLI.  
+- Baseline vs MrXLM is now directly comparable in this folder (and in 2.1/2.2 where applicable).
 
 ---
 
@@ -114,6 +141,13 @@ We compute **per-example validation loss** and **per-example deletion rate** (fr
 | XLM-R A100, 0.3 | SST-2 | −0.043 | −0.011 | Near zero / weak negative |
 | XLM-R A100, 0.3 | SNLI | −0.015 | −0.027 | Near zero |
 | XLM-R A100, 0.3 | XNLI | +0.005 | +0.007 | Near zero |
+| BERT L4, 0.3 no-PI | MRPC | +0.007 | +0.008 | Near zero |
+| BERT L4, 0.3 no-PI | SNLI | −0.019 | −0.016 | Near zero |
+| BERT L4, 0.3 no-PI | SST-2 | −0.041 | −0.049 | Near zero / weak negative |
+| XLM-R A100, 0.3 (3ep, warmup 1500) | MRPC | −0.130 | −0.208 | Negative (higher del → lower loss) |
+| XLM-R A100, 0.3 (3ep, warmup 1500) | SST-2 | **+0.195** | **+0.211** | Higher deletion → higher loss |
+| XLM-R A100, 0.3 (3ep, warmup 1500) | SNLI | −0.006 | +0.015 | Near zero |
+| XLM-R A100, 0.3 (3ep, warmup 1500) | XNLI | +0.011 | +0.070 | Weak positive |
 
 Across runs, **when the correlation is positive** (e.g. BERT MRPC in the L4 warmup runs), it supports the claim that **an increase in deletion rate is associated with an increase in loss** on that example—i.e. more aggressive pruning correlates with worse predictions. Where the correlation is near zero or slightly negative, the model may be deleting less informative tokens first, or the signal may be noisier; the positive cases in the table still show that loss vs. deletion rate is not independent and that over-deletion can be harmful.
 
@@ -164,15 +198,18 @@ Error cases are extracted by `scripts/extract_error_cases.py` (wrong prediction 
 
 ## 6. Data locations (results/new)
 
-- **BERT from L4**  
-  - `bert_from_l4/from_l4_MR_TARGET_DEL=0.5MR_USE_PI=1MODELS=bertGATE_WARMUP_STEPS=1000BATCH=24USE_WANDB=1LOG_LEVEL=1/`  
-  - `bert_from_l4/from_l4_MR_TARGET_DEL=0.3MR_USE_PI=1MODELS=bertBATCH=24EPOCHS=1GATE_WARMUP_STEPS=1000/`  
-  - `bert_from_l4/from_l4_MR_TARGET_DEL=0.3MODELS=bertBATCH=24EPOCHS=1/` (no warmup)  
-- **XLM-R from A100**  
-  - `xlmr_from_A100/epochs3batch24Mr-target-del0.5-mr-use-pi-log-level1-gate-warmup-steps1000/`  
-  - `xlmr_from_A100/epochs5Batch24MrTargetDel0.3GateWarmupSteps1500/`  
+All paths under `results/new/`. Each folder may contain `train_results.jsonl`, `loss_vs_deletion_*.json`, `error_cases_*.jsonl`, `latency_results.json`, and optionally `results/` or `logs/` subdirs (e.g. after copying from GPU/Modal).
 
-Each folder may contain `train_results.jsonl`, `loss_vs_deletion_*.json`, `error_cases_*.jsonl`, and `latency_results.json`.
+- **BERT from L4**  
+  - `bert_from_l4/from_l4_MR_TARGET_DEL=0.5MR_USE_PI=1MODELS=bertGATE_WARMUP_STEPS=1000BATCH=24USE_WANDB=1LOG_LEVEL=1/` — 0.5 + PI, 1 ep, batch 24  
+  - `bert_from_l4/from_l4_MR_TARGET_DEL=0.3MR_USE_PI=1MODELS=bertBATCH=24EPOCHS=1GATE_WARMUP_STEPS=1000/` — 0.3 + PI, 1 ep  
+  - `bert_from_l4/from_l4_MR_TARGET_DEL=0.3MODELS=bertBATCH=24EPOCHS=1/` — 0.3, no warmup  
+  - `bert_from_l4/from_l4_MR_TARGET_DEL=0.7MR_USE_PI=1MODELS=bertBATCH=24EPOCHS=1GATE_WARMUP_STEPS=1000LOG_LEVEL=1USE_WANDB=1/results/` — 0.7 + PI, 1 ep (results + logs in `results/`, `logs/`)  
+  - `bert_from_l4/MR_TARGET_DEL=0.3MR_USE_PI=0MODELS=bertBATCH=24EPOCHS=1GATE_WARMUP_STEPS=1000LOG_LEVEL=1USE_WANDB=1/results/` — 0.3 **no PI** (ablation), 1 ep  
+- **XLM-R from A100 (Modal)**  
+  - `xlmr_from_A100/epochs3batch24Mr-target-del0.5-mr-use-pi-log-level1-gate-warmup-steps1000/` — 0.5, 3 ep, warmup 1000  
+  - `xlmr_from_A100/epochs5Batch24MrTargetDel0.3GateWarmupSteps1500/` — 0.3, 5 ep, warmup 1500  
+  - `xlmr_from_A100/epochs3--batch 24--mr-target-del 0.3--mr-use-pi--log-level3gate-warmup-steps1500/` — 0.3, 3 ep, warmup 1500, log-level 3 (baseline + MrXLM per dataset)
 
 ---
 
@@ -240,10 +277,39 @@ This section documents how the main technical components are implemented in the 
 
 Prioritized list of follow-up work for experiments and the report. Items are in English for direct use in planning or the write-up.
 
-- [ ] **Run full XLM-R with baseline:** Execute one complete XLM-R run (L4 or Modal) so that every classification task has both Baseline XLM-R (gate_weight=0) and MrXLM. The script already runs baseline before MrXLM per dataset; fill the gap in the results table.
-- [ ] **PI ablation:** Add experiments comparing (1) **fixed \(\alpha\)** (no PI) vs full **PI controller**, and optionally (2) **P-only** vs **PI**, to show that the integral term and dynamic \(\alpha\) are necessary to hit the target deletion rate and avoid drift. Plot deletion rate vs step or deletion distribution for each setting.
-- [ ] **Pareto curve (accuracy vs speed):** For one model (e.g. BERT) and one or two datasets, run several target_deletion values (e.g. 0.2, 0.3, 0.5, 0.6), record validation accuracy and inference latency (or FLOPs if available). Plot accuracy vs latency (or vs FLOPs) and highlight the Pareto frontier in the report.
-- [ ] **Deletion vs loss visualization:** Use existing `loss_vs_deletion_*.json` scatter data to add a figure (e.g. scatter plot of loss vs deletion_rate per validation example) for one or two datasets, to support the “correlation between increase in loss and deletion rate” claim.
-- [ ] **Error-case narrative:** Pick 2–3 representative examples from `error_cases_snli.jsonl` or `error_cases_tydiqa.jsonl` (high deletion, wrong prediction) and briefly describe in the report: high deletion → important tokens dropped → prediction error, to reinforce the correlation and the need for controlling deletion.
-- [ ] **Optional — distillation:** If time allows, add a simple distillation setup (e.g. logits or one-layer feature alignment) to reduce XLM-R accuracy drop; report as preliminary or future work.
-- [ ] **Optional — cross-lingual:** If desired, add a short subsection on XNLI multi-language accuracy or language transfer gap; otherwise cite XNLI results already in the tables.
+### 8.1 XLM-R rescue (non-distillation)
+
+XLM-R “cracks” under the same gate settings that work for BERT (SNLI/SST-2/IMDB/XNLI drop to near random). Without distillation, the following **non-distillation** directions are recommended (by priority). **Items 1–3 are already implemented** (CLI args + `run_experiments.sh` + `run_xlmr_modal.py`); the descriptions below are kept for reference.
+
+1. **Move gate to a later layer (highest ROI)** — **Already implemented.**  
+   - **Idea:** Prune after layer **6 or 8** instead of 3 so multilingual semantics are more stable before deletion.  
+   - **Code:** `gate_layer_index` is supported in `MrXLMRoberta*` (and BERT) but is **hardcoded to 3** in `train_mrbert.py`; add `--gate_layer_index` and pass it into the model constructors.  
+   - **Trade-off:** Fewer layers run on shortened sequence → less speedup, but accuracy may recover.
+
+2. **Ultra-slow PI warmup** — **Already implemented.**  
+   - **Idea:** Use **GATE_WARMUP_STEPS ≥ 3000** and **lower \(K_p\)** (e.g. 0.002 instead of 0.5) so \(\alpha\) ramps up very slowly and the model adapts to low deletion (e.g. ~5%) before moving toward 30%.  
+   - **Code:** `--gate_warmup_steps` exists; PI gains are fixed in `PIController(kp=0.5, ki=1e-5)`. Add `--controller_kp` (and optionally `--controller_ki`) to the parser and pass them into `PIController`.
+
+3. **Higher retention threshold for XLM-R** — **Already implemented.**  
+   - **Idea:** Use a **higher gate_threshold_ratio** (e.g. 0.6–0.7) so more tokens are kept (less aggressive deletion) for XLM-R only.  
+   - **Code:** `gate_threshold_ratio` is already in the config (default 0.5); expose it as `--gate_threshold_ratio` and pass through when building the model.
+
+4. **Subword / token-group protection (optional)**  
+   - **Idea:** At inference, if any subword of a word is kept, force-keep all subwords of that word (avoids broken words with SentencePiece).  
+   - **Code:** Would require token-group logic in the hard-deletion path (e.g. in `modeling_mrxlm.py`) using tokenizer word boundaries.
+
+5. **Sigmoid temperature (optional)**  
+   - **Idea:** Softer gate (e.g. scaled sigmoid with temperature) so borderline tokens are less “binary” and get a bit more survival chance.  
+   - **Code:** Currently gate is `gate_k * sigmoid(logits)`; could add a temperature divisor inside sigmoid and expose it.
+
+**Priority order for implementation:** (1) `--gate_layer_index` and run XLM-R with layer 6 vs 3; (2) `--controller_kp` + longer warmup; (3) `--gate_threshold_ratio` for XLM-R. *(Items 1–3 are done.)* MRPC already improves with the gate (72% vs 68%); the goal is to replicate that kind of “controlled” deletion on SNLI/SST-2 by making the gate less aggressive (later layer, slower \(\alpha\), or higher keep threshold).
+
+### 8.2 General todos
+
+- [ ] **Run full XLM-R with baseline:** Execute one complete XLM-R run so that every task has Baseline XLM-R and MrXLM (done for the 2.3 run; 2.1/2.2 lack baseline in the same run).
+- [ ] **PI ablation:** Compare fixed \(\alpha\) (no PI) vs full PI; optionally P-only vs PI. Plot deletion rate vs step.
+- [ ] **Pareto curve (accuracy vs speed):** For BERT (and optionally XLM-R), sweep target_deletion, record val acc and latency; plot and highlight Pareto frontier.
+- [ ] **Deletion vs loss visualization:** Add a scatter figure from `loss_vs_deletion_*.json` for one or two datasets.
+- [ ] **Error-case narrative:** Describe 2–3 high-deletion error cases from SNLI/TyDi QA in the report.
+- [ ] **Optional — distillation:** If time allows, add distillation to reduce XLM-R accuracy drop.
+- [ ] **Optional — cross-lingual:** Short subsection on XNLI multi-language or transfer gap; or cite existing XNLI tables.

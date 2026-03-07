@@ -72,13 +72,17 @@ def run_xlmr_experiments(
     mr_use_pi: bool = True,
     log_level: int = 1,
     gate_warmup_steps: int = 0,
+    gate_layer_index: int = 3,
+    gate_threshold_ratio: float = 0.5,
+    controller_kp: float = 0.5,
+    controller_ki: float = 1e-5,
     use_wandb: bool = True,
     skip_snli: bool = False,
     skip_sst2: bool = False,
     skip_xnli: bool = False,
     skip_tydiqa: bool = False,
 ):
-    """Run only XLM-R / MrXLM experiments (no BERT). Same env as BERT: MR_TARGET_DEL, MR_USE_PI, LOG_LEVEL, GATE_WARMUP_STEPS."""
+    """Run only XLM-R / MrXLM experiments (no BERT). Env: MR_TARGET_DEL, GATE_WARMUP_STEPS, GATE_LAYER_INDEX, CONTROLLER_KP, etc."""
     env = os.environ.copy()
     env["MODELS"] = "xlmr"
     env["EPOCHS"] = str(epochs)
@@ -87,6 +91,10 @@ def run_xlmr_experiments(
     env["MR_USE_PI"] = "1" if mr_use_pi else "0"
     env["LOG_LEVEL"] = str(log_level)
     env["GATE_WARMUP_STEPS"] = str(gate_warmup_steps)
+    env["GATE_LAYER_INDEX"] = str(gate_layer_index)
+    env["GATE_THRESHOLD_RATIO"] = str(gate_threshold_ratio)
+    env["CONTROLLER_KP"] = str(controller_kp)
+    env["CONTROLLER_KI"] = str(controller_ki)
     env["PYTHONPATH"] = "/workspace"
     # WandB: if use_wandb is True, enable --use_wandb for train_mrbert.py.
     # If WANDB_API_KEY is not present inside the container, default to offline mode
@@ -136,13 +144,19 @@ def main(
     mr_use_pi: bool = True,
     log_level: int = 1,
     gate_warmup_steps: int = 0,
+    gate_layer_index: int = 3,
+    gate_threshold_ratio: float = 0.5,
+    controller_kp: float = 0.5,
+    controller_ki: float = 1e-5,
     use_wandb: bool = True,
     skip_snli: bool = False,
     skip_sst2: bool = False,
     skip_xnli: bool = False,
     skip_tydiqa: bool = False,
 ):
-    """Invoke XLM-R on Modal (A100). Run from project root: modal run run_xlmr_modal.py"""
+    """Invoke XLM-R on Modal (A100). Run from project root: modal run run_xlmr_modal.py
+    XLM-R rescue: try --gate-layer-index 6 --controller-kp 0.002 --gate-warmup-steps 3000
+    """
     print("Submitting XLM-R-only run on Modal (GPU=A100)...")
     run_xlmr_experiments.remote(
         epochs=epochs,
@@ -151,6 +165,10 @@ def main(
         mr_use_pi=mr_use_pi,
         log_level=log_level,
         gate_warmup_steps=gate_warmup_steps,
+        gate_layer_index=gate_layer_index,
+        gate_threshold_ratio=gate_threshold_ratio,
+        controller_kp=controller_kp,
+        controller_ki=controller_ki,
         use_wandb=use_wandb,
         skip_snli=skip_snli,
         skip_sst2=skip_sst2,
