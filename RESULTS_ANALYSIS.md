@@ -4,6 +4,40 @@ This file summarizes experimental results and analysis for MrBERT, MrXLM, and th
 
 ---
 
+## Structure and inventory of `results/new/`
+
+**Top-level:** Two directories, `bert_from_l4/` (L4 GPU) and `xlmr_from_A100/` (Modal A100).
+
+**BERT runs (6 run folders):**
+
+| Folder (under `bert_from_l4/`) | train_results location | loss_vs_deletion | error_cases | latency |
+|--------------------------------|------------------------|------------------|-------------|---------|
+| `from_l4_MR_TARGET_DEL=0.5MR_USE_PI=1MODELS=bertGATE_WARMUP_STEPS=1000BATCH=24USE_WANDB=1LOG_LEVEL=1/` | root | MRPC, SNLI, SST-2 | SNLI, TyDi QA | ✓ |
+| `from_l4_MR_TARGET_DEL=0.3MR_USE_PI=1MODELS=bertBATCH=24EPOCHS=1GATE_WARMUP_STEPS=1000/` | root | MRPC, SNLI, SST-2 | SNLI, TyDi QA | ✓ |
+| `from_l4_MR_TARGET_DEL=0.3MODELS=bertBATCH=24EPOCHS=1/` | root | MRPC, SNLI, SST-2 | SNLI, TyDi QA | ✓ |
+| `from_l4_MR_TARGET_DEL=0.5 MR_USE_PI=1EPOCHS=3BATCH=8LOG_LEVEL=1/` | root | MRPC, SNLI, SST-2 | SNLI, TyDi QA | ✓ |
+| `from_l4_MR_TARGET_DEL=0.7...GATE_WARMUP_STEPS=1000.../` | **results/** | MRPC, SNLI, SST-2 | SNLI, TyDi QA | ✓ |
+| `MR_TARGET_DEL=0.3MR_USE_PI=0...GATE_WARMUP_STEPS=1000.../` | **results/** | MRPC, SNLI, SST-2 | SNLI, TyDi QA | ✓ |
+
+**XLM-R runs (3 run folders):** All have `train_results.jsonl` in the run folder root. Each has `loss_vs_deletion` for MRPC, SNLI, SST-2, XNLI; `error_cases` for SNLI, TyDi QA. No XLM-R run has TyDi QA in `train_results.jsonl` in the current snapshot. No BERT run has `loss_vs_deletion_xnli.json`; no run has `loss_vs_deletion_imdb.json` (IMDB not in the analysis pipeline).
+
+**Note:** Some BERT folders contain two blocks in `train_results.jsonl`: an older 3-epoch batch-8 block (no `backbone` key) and a 1-epoch batch-24 block with `"backbone": "bert"`. Tables in Sections 1–2 use the **BERT 1-ep batch-24** (or 3-ep for XLM-R) rows. The 0.7 and no-PI runs write outputs under a `results/` subfolder; others write in the run folder root.
+
+### Analysis coverage (angles and gaps)
+
+| Angle | Covered? | Where |
+|-------|----------|--------|
+| **All runs in results/new** | Yes | Structure table + Section 6; BERT 6 runs, XLM-R 3 runs |
+| **Accuracy & actual deletion rate** | Yes | Sections 1–2 (per run, per dataset) |
+| **Per-example: loss vs deletion (“deleting wisely?”)** | Yes | Section 3: correlation of loss with deletion rate *within* validation set |
+| **Error cases (high-deletion failures)** | Yes | Section 4 (TyDi QA, SNLI) |
+| **Latency** | Yes | Section 5 |
+| **Cross-run comparison** | Yes | Cross-run (BERT) after 1.4; correlation table 3.1 |
+| **IMDB / TyDi QA loss_vs_deletion** | No | No `loss_vs_deletion_imdb.json` (pipeline skips IMDB); no TyDi QA correlation files in current snapshot |
+| **Scatter visualization** | No | Only Pearson/Spearman in table; `scatter_sample` in JSON not plotted here |
+
+---
+
 ## 1. MrBERT (BERT backbone) — L4 runs in `results/new/bert_from_l4`
 
 ### 1.1 BERT with warmup, target deletion 0.5 (1 epoch, batch 24, GATE_WARMUP_STEPS=1000)
@@ -64,6 +98,8 @@ Gate is on (gate_weight=1e-4) but **PI controller is off** (use_pi=false), so α
 
 **Takeaway:** Without PI, the gate still deletes heavily on MRPC (67.8%) and accuracy is close to baseline; on IMDB the gate barely activates (2.7%) and accuracy stays high. This supports that the PI controller is needed to steer deletion toward a target and avoid either over-deletion (MRPC) or under-activation (IMDB).
 
+**Cross-run (BERT, L4):** Across 0.3 / 0.5 / 0.7 + warmup runs, best validation accuracy per dataset is: MRPC 70.34% (baseline 0.7 run), SNLI 89.02% (0.3), SST-2 92.55% (0.3), XNLI 81.65% (0.5), TyDi QA 28.16% (0.3). IMDB is unstable (best baseline ~88%, MrBERT often much lower). The 0.3 + warmup configuration is the most balanced for SNLI/SST-2/XNLI/TyDi QA.
+
 ---
 
 ## 2. MrXLM (XLM-R backbone) — A100 runs in `results/new/xlmr_from_A100`
@@ -117,12 +153,19 @@ This run has **baseline XLM-R** (gate_weight=0) and **MrXLM 0.3** (PI) for each 
 
 ## 3. Loss vs. deletion rate: correlation analysis
 
-We compute **per-example validation loss** and **per-example deletion rate** (fraction of tokens dropped by the gate for that example) and store them in `loss_vs_deletion_<dataset>.json` under each run. Each file includes:
+### 3.0 Research question: does the model delete wisely?
+
+We ask: **on a per-example basis, is there a correlation between (increase in) loss and deletion rate?** For example, if a model deletes 50% of tokens on average, does it have **higher loss on examples where it deleted 70%** than on examples where it deleted 30%? This tells you whether the model **chooses to delete tokens wisely**:
+
+- **Positive correlation** (higher deletion → higher loss): when the model deletes more on an example, loss tends to go up → on those high-deletion examples it is hurting its own prediction. So the model is **not** deleting wisely on those examples; over-deletion is harmful.
+- **Near-zero or negative correlation**: the model may be deleting less informative tokens first on harder examples, or the signal is noisy; we cannot conclude it is deleting wisely, but at least we do not see a clear “more deletion → worse prediction” pattern within the validation set.
+
+The analysis below uses **per-example validation loss** and **per-example deletion rate** (fraction of tokens dropped by the gate for that example), stored in `loss_vs_deletion_<dataset>.json` under each run. Each file includes:
 
 - `pearson`, `spearman`: correlation between loss and deletion rate over validation examples.  
 - `scatter_sample`: a sample of (loss, deletion_rate) pairs.
 
-**There is a correlation between higher deletion rate and higher loss** in several settings, consistent with the intuition that removing more tokens tends to hurt prediction on that example.
+**Result:** There is a correlation between higher deletion rate and higher loss in several settings (e.g. BERT MRPC, XLM-R SST-2 in the 0.3 run), consistent with the intuition that removing more tokens tends to hurt prediction on that example; in other (run, dataset) pairs the correlation is near zero or slightly negative.
 
 ### 3.1 Representative correlations (from `results/new/`)
 
@@ -144,12 +187,15 @@ We compute **per-example validation loss** and **per-example deletion rate** (fr
 | BERT L4, 0.3 no-PI | MRPC | +0.007 | +0.008 | Near zero |
 | BERT L4, 0.3 no-PI | SNLI | −0.019 | −0.016 | Near zero |
 | BERT L4, 0.3 no-PI | SST-2 | −0.041 | −0.049 | Near zero / weak negative |
+| BERT L4, 0.5 (3ep, batch 8) | MRPC | +0.020 | +0.021 | Near zero |
+| BERT L4, 0.5 (3ep, batch 8) | SST-2 | +0.026 | −0.005 | Near zero |
+| BERT L4, 0.5 (3ep, batch 8) | SNLI | −0.065 | −0.084 | Weak negative |
 | XLM-R A100, 0.3 (3ep, warmup 1500) | MRPC | −0.130 | −0.208 | Negative (higher del → lower loss) |
 | XLM-R A100, 0.3 (3ep, warmup 1500) | SST-2 | **+0.195** | **+0.211** | Higher deletion → higher loss |
 | XLM-R A100, 0.3 (3ep, warmup 1500) | SNLI | −0.006 | +0.015 | Near zero |
 | XLM-R A100, 0.3 (3ep, warmup 1500) | XNLI | +0.011 | +0.070 | Weak positive |
 
-Across runs, **when the correlation is positive** (e.g. BERT MRPC in the L4 warmup runs), it supports the claim that **an increase in deletion rate is associated with an increase in loss** on that example—i.e. more aggressive pruning correlates with worse predictions. Where the correlation is near zero or slightly negative, the model may be deleting less informative tokens first, or the signal may be noisier; the positive cases in the table still show that loss vs. deletion rate is not independent and that over-deletion can be harmful.
+Across runs, **when the correlation is positive** (e.g. BERT MRPC in the L4 warmup runs), it supports the claim that **an increase in deletion rate is associated with an increase in loss** on that example—i.e. more aggressive pruning correlates with worse predictions. The **strongest positive** correlation in the inventory is XLM-R 0.3 (3ep, warmup 1500) on SST-2 (Pearson +0.195, Spearman +0.211), consistent with over-deletion hurting that task. Where the correlation is near zero or slightly negative, the model may be deleting less informative tokens first, or the signal may be noisier; the positive cases in the table still show that loss vs. deletion rate is not independent and that over-deletion can be harmful.
 
 **Why only these datasets?** The table is built from **existing** `loss_vs_deletion_<dataset>.json` files under `results/new/` (each contains `pearson` and `spearman`). Only (run, dataset) pairs that have such a file are included. The reason other datasets do not appear in the table is that there is **no** `loss_vs_deletion` file for them (i.e. no correlation data between loss and deletion rate), not that there is no training loss.
 
@@ -159,7 +205,7 @@ Across runs, **when the correlation is positive** (e.g. BERT MRPC in the L4 warm
 
 ### 3.2 Summary sentence for the report
 
-**There is a correlation between the increase in loss and the deletion rate:** in several BERT (and some XLM-R) runs, validation examples with higher per-example deletion rates tend to have higher cross-entropy loss. The effect is modest in magnitude (e.g. Pearson ≈ 0.03–0.07 where positive) but supports the design goal of controlling deletion via the PI controller and the observation that excessive deletion (e.g. on XLM-R SST-2/SNLI or TyDi QA) coincides with poor accuracy.
+**Per-example “deleting wisely” check:** We test whether, when a model deletes more on a given example, loss increases. In several BERT (and some XLM-R) runs, validation examples with higher per-example deletion rates tend to have higher cross-entropy loss (positive Pearson/Spearman). That implies the model does not delete wisely on those high-deletion examples—over-deletion hurts. The effect is modest in magnitude (e.g. Pearson ≈ 0.03–0.07 where positive) but supports the design goal of controlling deletion via the PI controller and the observation that excessive deletion (e.g. on XLM-R SST-2/SNLI or TyDi QA) coincides with poor accuracy.
 
 ---
 
@@ -198,18 +244,28 @@ Error cases are extracted by `scripts/extract_error_cases.py` (wrong prediction 
 
 ## 6. Data locations (results/new)
 
-All paths under `results/new/`. Each folder may contain `train_results.jsonl`, `loss_vs_deletion_*.json`, `error_cases_*.jsonl`, `latency_results.json`, and optionally `results/` or `logs/` subdirs (e.g. after copying from GPU/Modal).
+All paths under `results/new/`. **train_results.jsonl** is in the run folder **root** unless stated otherwise (two BERT runs use a `results/` subfolder).
 
-- **BERT from L4**  
-  - `bert_from_l4/from_l4_MR_TARGET_DEL=0.5MR_USE_PI=1MODELS=bertGATE_WARMUP_STEPS=1000BATCH=24USE_WANDB=1LOG_LEVEL=1/` — 0.5 + PI, 1 ep, batch 24  
-  - `bert_from_l4/from_l4_MR_TARGET_DEL=0.3MR_USE_PI=1MODELS=bertBATCH=24EPOCHS=1GATE_WARMUP_STEPS=1000/` — 0.3 + PI, 1 ep  
-  - `bert_from_l4/from_l4_MR_TARGET_DEL=0.3MODELS=bertBATCH=24EPOCHS=1/` — 0.3, no warmup  
-  - `bert_from_l4/from_l4_MR_TARGET_DEL=0.7MR_USE_PI=1MODELS=bertBATCH=24EPOCHS=1GATE_WARMUP_STEPS=1000LOG_LEVEL=1USE_WANDB=1/results/` — 0.7 + PI, 1 ep (results + logs in `results/`, `logs/`)  
-  - `bert_from_l4/MR_TARGET_DEL=0.3MR_USE_PI=0MODELS=bertBATCH=24EPOCHS=1GATE_WARMUP_STEPS=1000LOG_LEVEL=1USE_WANDB=1/results/` — 0.3 **no PI** (ablation), 1 ep  
-- **XLM-R from A100 (Modal)**  
-  - `xlmr_from_A100/epochs3batch24Mr-target-del0.5-mr-use-pi-log-level1-gate-warmup-steps1000/` — 0.5, 3 ep, warmup 1000  
-  - `xlmr_from_A100/epochs5Batch24MrTargetDel0.3GateWarmupSteps1500/` — 0.3, 5 ep, warmup 1500  
-  - `xlmr_from_A100/epochs3--batch 24--mr-target-del 0.3--mr-use-pi--log-level3gate-warmup-steps1500/` — 0.3, 3 ep, warmup 1500, log-level 3 (baseline + MrXLM per dataset)
+**BERT from L4** (`bert_from_l4/`):
+
+| Run | Path | train_results | Description |
+|-----|------|---------------|-------------|
+| 0.5 + warmup, 1 ep, batch 24 | `from_l4_MR_TARGET_DEL=0.5MR_USE_PI=1MODELS=bertGATE_WARMUP_STEPS=1000BATCH=24USE_WANDB=1LOG_LEVEL=1/` | root | Main 1.1 table |
+| 0.3 + warmup, 1 ep | `from_l4_MR_TARGET_DEL=0.3MR_USE_PI=1MODELS=bertBATCH=24EPOCHS=1GATE_WARMUP_STEPS=1000/` | root | Main 1.2 table |
+| 0.3, no warmup, 1 ep | `from_l4_MR_TARGET_DEL=0.3MODELS=bertBATCH=24EPOCHS=1/` | root | 0.3 no warmup (legacy) |
+| 0.5, 3 ep, batch 8 | `from_l4_MR_TARGET_DEL=0.5 MR_USE_PI=1EPOCHS=3BATCH=8LOG_LEVEL=1/` | root | Legacy 3-ep run |
+| 0.7 + warmup, 1 ep | `from_l4_MR_TARGET_DEL=0.7MR_USE_PI=1MODELS=bertBATCH=24EPOCHS=1GATE_WARMUP_STEPS=1000LOG_LEVEL=1USE_WANDB=1/` | **results/** | Main 1.3 table |
+| 0.3 no PI, 1 ep | `MR_TARGET_DEL=0.3MR_USE_PI=0MODELS=bertBATCH=24EPOCHS=1GATE_WARMUP_STEPS=1000LOG_LEVEL=1USE_WANDB=1/` | **results/** | Main 1.4 table |
+
+**XLM-R from A100 (Modal)** (`xlmr_from_A100/`): train_results in run folder root for all.
+
+| Run | Path | Description |
+|-----|------|-------------|
+| 0.5, 3 ep, warmup 1000 | `epochs3batch24Mr-target-del0.5-mr-use-pi-log-level1-gate-warmup-steps1000/` | Section 2.1; no baseline in same file |
+| 0.3, 5 ep, warmup 1500 | `epochs5Batch24MrTargetDel0.3GateWarmupSteps1500/` | Section 2.2 |
+| 0.3, 3 ep, warmup 1500 | `epochs3--batch 24--mr-target-del 0.3--mr-use-pi--log-level3gate-warmup-steps1500/` | Section 2.3; baseline + MrXLM per dataset |
+
+Each folder may also contain `loss_vs_deletion_*.json`, `error_cases_*.jsonl`, `latency_results.json`, and optionally `results/` or `logs/` subdirs.
 
 ---
 
