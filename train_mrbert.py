@@ -11,6 +11,7 @@ import subprocess
 import time
 import sys
 import datetime
+import json
 from pathlib import Path
 import torch
 from torch.utils.data import DataLoader
@@ -297,6 +298,15 @@ def main():
                         help="Phase A: first N steps with --phase1_gate_weight (gate adaptation); 0 = disabled")
     parser.add_argument("--phase1_gate_weight", type=float, default=1e-3,
                         help="Gate regularizer weight during phase 1 (gate adaptation)")
+    parser.add_argument(
+        "--log_deletion_trace",
+        type=str,
+        default=None,
+        help=(
+            "Optional JSONL path to log per-step deletion_rate traces for analysis "
+            "(Figure B: deletion rate vs step, PI vs fixed alpha)."
+        ),
+    )
     parser.add_argument("--output_result", type=str, default=None,
                         help="Append one JSON line with dataset, gate_weight, use_pi, target_deletion, val_acc to this file")
     parser.add_argument("--max_train_samples", type=int, default=None,
@@ -469,6 +479,27 @@ def main():
     final_avg_train_loss = None
 
     start_time = time.time()
+    deletion_trace_file = None
+    if args.log_deletion_trace:
+        from pathlib import Path as _PathTrace
+
+        deletion_trace_file = _PathTrace(args.log_deletion_trace)
+        deletion_trace_file.parent.mkdir(parents=True, exist_ok=True)
+        # Small header to document what this trace is.
+        with deletion_trace_file.open("a") as f_tr:
+            f_tr.write(
+                json.dumps(
+                    {
+                        "meta": True,
+                        "dataset": args.dataset,
+                        "backbone": args.backbone,
+                        "use_pi": args.use_pi,
+                        "target_deletion": args.target_deletion,
+                        "gate_weight": args.gate_weight,
+                    }
+                )
+                + "\n"
+            )
     total_steps = len(train_loader) * args.epochs
     step = 0
     for epoch in range(args.epochs):
@@ -526,6 +557,19 @@ def main():
                     sum_gate_mean += gate.mean().item()
                     sum_gate_var += gate.var().item()
                     n_gate_batches += 1
+                    if deletion_trace_file is not None:
+                        # Log fine-grained deletion trace for Figure B (optional).
+                        trace_row = {
+                            "step": step,
+                            "deletion_rate": del_rate,
+                            "alpha": gate_regularizer_weight,
+                            "use_pi": args.use_pi,
+                            "dataset": args.dataset,
+                            "backbone": args.backbone,
+                            "tag": f"{args.dataset}_{'pi' if args.use_pi else 'no_pi'}",
+                        }
+                        with deletion_trace_file.open("a") as f_tr:
+                            f_tr.write(json.dumps(trace_row) + "\n")
             if step == args.gate_warmup_steps and args.gate_warmup_steps > 0:
                 print(f"  Gate warm-up done at step {step}; enabling gate regularizer (alpha={gate_regularizer_weight:.2e})")
             if step == args.phase1_steps and args.phase1_steps > 0:
@@ -826,7 +870,6 @@ def main():
         wandb.finish()
 
     if args.output_result:
-        import json
         from pathlib import Path
         Path(args.output_result).parent.mkdir(parents=True, exist_ok=True)
         row = {
