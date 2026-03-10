@@ -105,9 +105,16 @@ def _load_latency(root: Path) -> Dict[Path, Dict[str, float]]:
     return out
 
 
+def _fig_dir() -> Path:
+    """Directory for figure outputs (report/final_report/figures)."""
+    out = FIG_ROOT / "figures"
+    out.mkdir(parents=True, exist_ok=True)
+    return out
+
+
 def _ensure_fig_dir() -> Path:
     FIG_ROOT.mkdir(parents=True, exist_ok=True)
-    return FIG_ROOT
+    return _fig_dir()
 
 
 # === Figure A: Pareto frontier (latency vs accuracy) ============================================
@@ -151,26 +158,54 @@ def plot_pareto(fig_name: str = "fig_A_pareto.png") -> None:
         print("No suitable BERT runs with latency_results.json found for Pareto plot.")
         return
 
-    # Different marker per dataset for clarity (e.g. MRPC circle, SST-2 square)
+    # Build baseline lookup by dataset (normalize label for matching)
+    baseline_by_ds: Dict[str, Tuple[float, float]] = {}
+    for x, y, lbl in points_baseline:
+        k = lbl.upper().replace("-", "").replace("_", "")
+        baseline_by_ds[k] = (x, y)
+    mrbert_by_ds: Dict[str, Tuple[float, float, str]] = {}
+    for x, y, lbl in points_mrbert:
+        k = lbl.upper().replace("-", "").replace("_", "")
+        mrbert_by_ds[k] = (x, y, lbl)
+
+    # Different marker per dataset for clarity
     _dataset_markers = {
         "MRPC": "o", "SST2": "s", "SNLI": "^", "IMDB": "D", "XNLI": "p", "TYDIQA": "v",
     }
 
     _ensure_fig_dir()
-    plt.figure(figsize=(6, 4))
+    fig, ax = plt.subplots(figsize=(6, 4))
+    # Shade "Ideal region" (top-left: higher accuracy, lower latency)
+    x_all = [p[0] for p in points_baseline] + [p[0] for p in points_mrbert]
+    y_all = [p[1] for p in points_baseline] + [p[1] for p in points_mrbert]
+    x_max, x_min = max(x_all), min(x_all)
+    y_max, y_min = max(y_all), min(y_all)
+    # Light green band in top-left (axis coords: left 20%, top 30%)
+    ax.axhspan(y_max - 0.25 * (y_max - y_min), y_max + (y_max - y_min) * 0.05, xmin=0, xmax=0.22, color="green", alpha=0.12)
+    ax.text(x_min + 0.03 * (x_max - x_min), y_max - 0.05 * (y_max - y_min), "Ideal region", fontsize=8, color="green", style="italic", alpha=0.9)
     for x, y, lbl in points_baseline:
         m = _dataset_markers.get(lbl.upper(), "o")
-        plt.scatter(x, y, marker=m, color="C0", alpha=0.8)
-        plt.text(x * 1.002, y, lbl, fontsize=7, color="C0")
+        ax.scatter(x, y, marker=m, color="C0", alpha=0.8, zorder=2)
+        ax.text(x * 1.002, y, lbl, fontsize=7, color="C0")
     for x, y, lbl in points_mrbert:
         m = _dataset_markers.get(lbl.upper(), "^")
-        plt.scatter(x, y, marker=m, color="C1", alpha=0.8)
-        plt.text(x * 1.002, y, lbl, fontsize=7, color="C1")
-    plt.xlabel("Latency (ms per batch)")
-    plt.ylabel("Validation accuracy (%)")
-    plt.title("Figure A: Pareto frontier (BERT L4)")
-    plt.legend(["Baseline BERT", "MrBERT"], loc="lower left")
-    out_path = FIG_ROOT / fig_name
+        k = lbl.upper().replace("-", "").replace("_", "")
+        base = baseline_by_ds.get(k)
+        # Highlight if MrBERT is Pareto-superior (higher acc or lower latency)
+        if base:
+            b_lat, b_acc = base
+            if x < b_lat or y > b_acc:
+                ax.scatter(x, y, marker=m, color="C1", alpha=0.9, s=100, edgecolors="darkgreen", linewidths=2, zorder=3)
+            else:
+                ax.scatter(x, y, marker=m, color="C1", alpha=0.8, zorder=2)
+        else:
+            ax.scatter(x, y, marker=m, color="C1", alpha=0.8, zorder=2)
+        ax.text(x * 1.002, y, lbl, fontsize=7, color="C1")
+    ax.set_xlabel("Latency (ms per batch)")
+    ax.set_ylabel("Validation accuracy (%)")
+    ax.set_title("Figure A: Pareto frontier (BERT L4)")
+    ax.legend(["Baseline BERT", "MrBERT"], loc="lower left")
+    out_path = _fig_dir() / fig_name
     plt.tight_layout()
     plt.savefig(out_path, dpi=200)
     plt.close()
@@ -183,6 +218,7 @@ def plot_pareto(fig_name: str = "fig_A_pareto.png") -> None:
 def plot_deletion_trace(
     trace_files: List[Path],
     fig_name: str = "fig_B_deletion_vs_step.png",
+    warmup_steps: int = 1000,
 ) -> None:
     """
     Plot deletion-rate vs training step for PI vs fixed-alpha runs.
@@ -193,6 +229,7 @@ def plot_deletion_trace(
 
     Args:
       trace_files: list of JSONL files (e.g., one for PI, one for no-PI).
+      warmup_steps: steps 0 to warmup_steps are annotated as "Warmup period" (default 1000).
     """
     if not trace_files:
         print("No trace files provided for Figure B; skipping.")
@@ -222,16 +259,19 @@ def plot_deletion_trace(
         return
 
     _ensure_fig_dir()
-    plt.figure(figsize=(6, 4))
+    fig, ax = plt.subplots(figsize=(6, 4))
     for tag, (steps, dels) in curves.items():
-        plt.plot(steps, dels, label=tag)
-    plt.xlabel("Training step")
-    plt.ylabel("Deletion rate")
-    plt.title("Figure B: Deletion rate vs step (PI vs fixed alpha)")
-    plt.legend()
-    # Short note: PI converges smoothly; fixed alpha can oscillate.
+        ax.plot(steps, dels, label=tag)
+    # Shade warmup period (0 to warmup_steps): control handover to PI
+    ax.axvspan(0, warmup_steps, alpha=0.2, color="gray")
+    ylo, yhi = ax.get_ylim()
+    ax.text(warmup_steps * 0.5, yhi - 0.03 * (yhi - ylo), f"Warmup period (0–{warmup_steps} steps)", ha="center", fontsize=8, style="italic")
+    ax.set_xlabel("Training step")
+    ax.set_ylabel("Deletion rate")
+    ax.set_title("Figure B: Deletion rate vs step (PI vs fixed alpha)")
+    ax.legend()
     plt.figtext(0.5, 0.02, "PI controller converges toward target; fixed \u03b1 often oscillates.", ha="center", fontsize=8, style="italic")
-    out_path = FIG_ROOT / fig_name
+    out_path = _fig_dir() / fig_name
     plt.tight_layout()
     plt.savefig(out_path, dpi=200)
     plt.close()
@@ -279,7 +319,7 @@ def plot_accuracy_summary(fig_name: str = "fig_E_accuracy_summary.png") -> None:
     plt.ylabel("Validation accuracy (%)")
     plt.title("Figure E: Accuracy summary (baseline vs gated)")
     plt.legend(fontsize=8)
-    out_path = FIG_ROOT / fig_name
+    out_path = _fig_dir() / fig_name
     plt.tight_layout()
     plt.savefig(out_path, dpi=200)
     plt.close()
@@ -332,24 +372,41 @@ def plot_task_sensitivity(fig_name: str = "fig_D_task_sensitivity.png") -> None:
         mat[i, j] = acc * 100.0
 
     _ensure_fig_dir()
-    plt.figure(figsize=(6, 4))
-    im = plt.imshow(mat, aspect="auto", origin="lower", cmap="viridis")
-    plt.colorbar(im, label="Accuracy (%)")
-    plt.yticks(range(len(tasks)), [t.upper() for t in tasks])
-    plt.xticks(range(len(targets)), [str(td) for td in targets])
-    plt.xlabel("Target deletion ratio")
-    plt.ylabel("Dataset")
-    plt.title("Figure D: Task sensitivity (BERT, gated accuracy)")
-    # Annotate worst cell (over-deletion / collapse)
+    fig, ax = plt.subplots(figsize=(6, 4))
+    im = ax.imshow(mat, aspect="auto", origin="lower", cmap="viridis")
+    plt.colorbar(im, ax=ax, label="Accuracy (%)")
+    ax.set_yticks(range(len(tasks)))
+    ax.set_yticklabels([t.upper() for t in tasks])
+    ax.set_xticks(range(len(targets)))
+    ax.set_xticklabels([str(td) for td in targets])
+    ax.set_xlabel("Target deletion ratio")
+    ax.set_ylabel("Dataset")
+    ax.set_title("Figure D: Task sensitivity (BERT, gated accuracy)")
+    # Failure zone: red box around 0% or very low accuracy cells
+    import matplotlib.patches as mpatches
+    failure_threshold = 5.0  # treat as failure zone if accuracy <= 5%
+    failure_cells: List[Tuple[int, int]] = []
+    for i in range(mat.shape[0]):
+        for j in range(mat.shape[1]):
+            if not np.isnan(mat[i, j]) and mat[i, j] <= failure_threshold:
+                failure_cells.append((i, j))
+    if failure_cells:
+        for (i, j) in failure_cells:
+            rect = mpatches.Rectangle((j - 0.5, i - 0.5), 1, 1, linewidth=2, edgecolor="red", facecolor="none")
+            ax.add_patch(rect)
+        # Label one corner of the failure zone
+        i0, j0 = failure_cells[0]
+        ax.text(j0, i0 - 0.6, "Failure zone", ha="center", fontsize=7, color="red", weight="bold")
+    # Annotate worst cell (over-deletion / collapse) if not already in failure zone
     valid = ~np.isnan(mat)
     if np.any(valid):
         flat_min = np.nanmin(mat)
         ij = np.where(np.isclose(mat, flat_min) & valid)
         if len(ij[0]) > 0:
             i, j = int(ij[0][0]), int(ij[1][0])
-            if flat_min < 40:  # only label clear collapse
-                plt.text(j, i, "Over-deletion\nthreshold", ha="center", va="center", fontsize=7, color="white", weight="bold")
-    out_path = FIG_ROOT / fig_name
+            if flat_min < 40 and (i, j) not in failure_cells:
+                ax.text(j, i, "Over-deletion\nthreshold", ha="center", va="center", fontsize=7, color="white", weight="bold")
+    out_path = _fig_dir() / fig_name
     plt.tight_layout()
     plt.savefig(out_path, dpi=200)
     plt.close()
@@ -387,7 +444,7 @@ def plot_tydiqa_curve(fig_name: str = "fig_H_tydiqa_sensitivity.png") -> None:
     plt.ylabel("TyDi QA EM (%)")
     plt.title("Figure H: TyDi QA vs target deletion (BERT)")
     plt.legend()
-    out_path = FIG_ROOT / fig_name
+    out_path = _fig_dir() / fig_name
     plt.tight_layout()
     plt.savefig(out_path, dpi=200)
     plt.close()
@@ -437,7 +494,7 @@ def plot_deletion_histogram(
     plt.xlabel("Deletion rate")
     plt.ylabel("Count (sampled examples)")
     plt.title(f"Figure F: Deletion-rate histogram ({dataset.upper()})")
-    out_path = FIG_ROOT / fig_name
+    out_path = _fig_dir() / fig_name
     plt.tight_layout()
     plt.savefig(out_path, dpi=200)
     plt.close()
@@ -470,7 +527,7 @@ def plot_loss_vs_deletion_scatter(
     plt.xlabel("Deletion rate")
     plt.ylabel("Per-example loss")
     plt.title(f"Figure G: Loss vs deletion ({dataset.upper()})")
-    out_path = FIG_ROOT / fig_name
+    out_path = _fig_dir() / fig_name
     plt.tight_layout()
     plt.savefig(out_path, dpi=200)
     plt.close()
