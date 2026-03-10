@@ -151,13 +151,20 @@ def plot_pareto(fig_name: str = "fig_A_pareto.png") -> None:
         print("No suitable BERT runs with latency_results.json found for Pareto plot.")
         return
 
+    # Different marker per dataset for clarity (e.g. MRPC circle, SST-2 square)
+    _dataset_markers = {
+        "MRPC": "o", "SST2": "s", "SNLI": "^", "IMDB": "D", "XNLI": "p", "TYDIQA": "v",
+    }
+
     _ensure_fig_dir()
     plt.figure(figsize=(6, 4))
     for x, y, lbl in points_baseline:
-        plt.scatter(x, y, marker="o", color="C0", alpha=0.8)
+        m = _dataset_markers.get(lbl.upper(), "o")
+        plt.scatter(x, y, marker=m, color="C0", alpha=0.8)
         plt.text(x * 1.002, y, lbl, fontsize=7, color="C0")
     for x, y, lbl in points_mrbert:
-        plt.scatter(x, y, marker="^", color="C1", alpha=0.8)
+        m = _dataset_markers.get(lbl.upper(), "^")
+        plt.scatter(x, y, marker=m, color="C1", alpha=0.8)
         plt.text(x * 1.002, y, lbl, fontsize=7, color="C1")
     plt.xlabel("Latency (ms per batch)")
     plt.ylabel("Validation accuracy (%)")
@@ -222,6 +229,8 @@ def plot_deletion_trace(
     plt.ylabel("Deletion rate")
     plt.title("Figure B: Deletion rate vs step (PI vs fixed alpha)")
     plt.legend()
+    # Short note: PI converges smoothly; fixed alpha can oscillate.
+    plt.figtext(0.5, 0.02, "PI controller converges toward target; fixed \u03b1 often oscillates.", ha="center", fontsize=8, style="italic")
     out_path = FIG_ROOT / fig_name
     plt.tight_layout()
     plt.savefig(out_path, dpi=200)
@@ -331,6 +340,15 @@ def plot_task_sensitivity(fig_name: str = "fig_D_task_sensitivity.png") -> None:
     plt.xlabel("Target deletion ratio")
     plt.ylabel("Dataset")
     plt.title("Figure D: Task sensitivity (BERT, gated accuracy)")
+    # Annotate worst cell (over-deletion / collapse)
+    valid = ~np.isnan(mat)
+    if np.any(valid):
+        flat_min = np.nanmin(mat)
+        ij = np.where(np.isclose(mat, flat_min) & valid)
+        if len(ij[0]) > 0:
+            i, j = int(ij[0][0]), int(ij[1][0])
+            if flat_min < 40:  # only label clear collapse
+                plt.text(j, i, "Over-deletion\nthreshold", ha="center", va="center", fontsize=7, color="white", weight="bold")
     out_path = FIG_ROOT / fig_name
     plt.tight_layout()
     plt.savefig(out_path, dpi=200)

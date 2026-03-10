@@ -249,7 +249,7 @@ Across runs, the Pareto frontier demonstrates that our gated models can occupy P
 
 To understand whether the model **deletes wisely** on a per-example basis, we compute per-example validation loss and deletion rate and store them in `loss_vs_deletion_<dataset>.json` files. Each contains Pearson and Spearman correlations and a sampled scatter of (loss, deletion rate) pairs.
 
-Figure F (deletion histogram) and Figure G (loss vs deletion scatter) illustrate the distribution of deletion rates and their relationship to loss for MRPC and SST-2.
+Figure F (deletion histogram) and Figure G (loss vs deletion scatter) illustrate the distribution of deletion rates and their relationship to loss for MRPC and SST-2. The **loss–deletion correlation is often weaker on SST-2 than on MRPC** because single-sentence sentiment (SST-2) has higher redundancy: many tokens can be removed while the model still relies on the remaining ones, so per-example loss does not rise as sharply with deletion. On MRPC (sentence-pair paraphrase), dropping key tokens more readily hurts the prediction, so the correlation tends to be stronger.
 
 ![Figure F (MRPC): Deletion-rate histogram](figures/fig_F_deletion_hist_mrpc.png)
 
