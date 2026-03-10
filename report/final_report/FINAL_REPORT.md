@@ -1,9 +1,7 @@
 ## Title and Key Information
 
 **Title**: MrBERT and MrXLM: Dynamic Token Merging for Efficient Classification and QA  
-**Team members**:  
-- \[Your Name 1\] (`sunetid1@stanford.edu`)  
-- \[Your Name 2\] (`sunetid2@stanford.edu`, if applicable)  
+**Team members**:
 **Project type**: Custom project  
 **TA mentor**: \[TA name\]  
 **External collaborators / mentors**: None  
@@ -114,6 +112,45 @@ Directly porting the BERT gate design to XLM-R leads to strong degradation on se
 
 These modifications are reflected in the XLM-R runs in `results/new/xlmr_from_A100/` and summarized in Section 5.
 
+### 3.5 Implementation highlights and design choices
+
+Here we briefly describe several concrete implementation decisions, what problems they were solving, and why we chose our current design:
+
+- **Soft vs hard deletion (`use_soft_deletion`).**  
+  - **Problem.** Directly hard-deleting tokens during training makes the model non-differentiable with respect to deletion decisions and can lead to unstable training.  
+  - **Design.** We added a `use_soft_deletion` flag in all gated encoders (MrBERT, MrXLM, MrRoberta) and defaulted it to `self.training` in `forward`. Training always uses **soft deletion** (gate as attention bias; full-length sequence), while evaluation uses **hard deletion** (shortened sequence). This clean separation lets us optimize with stable gradients while still realizing real latency gains at inference.
+
+- **QA span remapping with `keep_indices` / `kept_lengths` (deletion map).**  
+  - **Problem.** In TyDi QA (and any span-based head), hard deletion shortens the sequence. The span head predicts `(start_short, end_short)` in this **short** sequence; without a deletion map, these indices no longer align with the original context, so EM would be computed in the wrong coordinate system.  
+  - **Design.** In the hard-deletion path of `MrBertModel` / `MrXLMRobertaModel`, we:  
+    1. Compute a binary keep mask `keep_masks = (gate > gate_k * gate_threshold_ratio)` (and always keep `[CLS]` / first token).  
+    2. For each batch element \(b\), collect original indices of kept tokens into `keep_indices[b, j]` and their counts into `kept_lengths[b]`.  
+    3. Use `torch.gather` with `keep_indices` to build a shorter hidden-state tensor `(batch, max_kept, hidden_size)` for the remaining layers and heads.  
+    4. In `train_mrbert.py` and `scripts/extract_error_cases.py`, map predicted `(start_short, end_short)` back to original indices via `keep_indices.gather(...)` before computing EM.  
+  This explicit deletion map is what makes it safe to combine hard deletion with span-level evaluation.
+
+- **Gate warmup and two-phase schedule.**  
+  - **Problem.** When we turned on the gate from step 0, the model sometimes collapsed early: deletion spiked before the classifier/QA head learned a reasonable decision boundary.  
+  - **Design.** In `train_mrbert.py` we added `--gate_warmup_steps` and an optional Phase A (`--phase1_steps`, `--phase1_gate_weight`). During warmup we set \(\alpha = 0\) so the model learns on full sequences; Phase A uses a lighter gate weight to gently adapt deletion; Phase B uses the full gate/PI strength. This schedule stabilizes training, especially for TyDi QA and XLM-R.
+
+- **PI controller and deletion-rate logging.**  
+  - **Problem.** A fixed gate weight \(\alpha\) can lead to oscillatory or unstable deletion rates across steps, and makes it hard to compare runs at a given target deletion.  
+  - **Design.** We implemented `mrbert/pi_controller.py` and wired it into `train_mrbert.py` with `--use_pi`, `--controller_kp`, and `--controller_ki`. We also added a lightweight `--log_deletion_trace` option that records per-step deletion rates into JSONL files. These traces underpin Figure B and allow us to empirically validate that PI tracks the target deletion more smoothly than a fixed \(\alpha\).
+
+- **Gate placement and XLM-R rescue flags.**  
+  - **Problem.** XLM-R was much more brittle than BERT under the same gate settings: the gate at layer 3 with threshold ratio 0.5 and default PI gains over-deleted on SST-2/SNLI/XNLI.  
+  - **Design.** Rather than hard-coding these hyperparameters, we exposed them as CLI flags (`--gate_layer_index`, `--gate_threshold_ratio`, `--controller_kp`, `--controller_ki`, `--gate_warmup_steps`) and threaded them through `run_experiments.sh` and `run_xlmr_modal.py`. This made it easy to test late-gate, higher-threshold, and slower-PI configurations that partially recover XLM-R performance (as summarized in Section 5 and Figure D/H).
+
+- **Loss–deletion correlation and error-case pipeline.**  
+  - **Problem.** We initially had only aggregate deletion and accuracy numbers, which made it hard to answer per-example questions such as “does deleting more on this example make it worse?” or to systematically study high-deletion failures.  
+  - **Design.** We built a small analysis pipeline: `analyze_loss_vs_deletion` computes per-example loss and deletion rate and writes `loss_vs_deletion_<dataset>.json` (with Pearson/Spearman and `scatter_sample`), and `scripts/extract_error_cases.py` filters misclassified high-deletion examples into `error_cases_*.jsonl`. These files power Figure F/G and the error analysis in Section 5.2.
+
+- **Latency benchmark and Pareto plotting.**  
+  - **Problem.** Measuring training speed alone does not capture inference-time benefits, and raw latency numbers are hard to interpret across models and tasks.  
+  - **Design.** We implemented `latency_benchmark.py` to run multiple forward passes for baseline BERT and MrBERT under identical batch/sequence settings and wrote `latency_results.json`. The plotting script `scripts/plot_mrbert_figures.py` then aggregates these with `train_results.jsonl` to produce Figure A (Pareto frontier) and Figure E (accuracy summary), making the accuracy–efficiency trade-offs visually clear.
+
+Overall, these implementation choices were driven by concrete failure modes we observed (non-differentiable deletion, broken QA spans, unstable deletion rates, brittle XLM-R, limited per-example insight) and were iterated on until the behavior matched the design goals of stable training, meaningful deletion-rate control, and fair cross-model comparisons.
+
 ---
 
 ## 4 Experiments
@@ -163,6 +200,8 @@ Figure E (accuracy summary) and Section 1 of `RESULTS_ANALYSIS.md` summarize BER
 
 Figure A (Pareto frontier) plots validation accuracy vs latency for baseline BERT vs MrBERT across datasets, showing that MrBERT often lies on or near the Pareto frontier: at similar accuracy, it can be faster; at similar latency, it can be more accurate.
 
+![Figure A: Pareto frontier (BERT L4)](figures/fig_A_pareto.png)
+
 ### 4.4 Main quantitative results (XLM-R)
 
 For XLM-R we focus on 3-epoch runs (`xlmr_from_A100`):
@@ -189,6 +228,8 @@ For XLM-R we focus on 3-epoch runs (`xlmr_from_A100`):
 
 Figure D (task sensitivity heatmap) highlights that MrBERT tolerates higher deletion on SST-2, SNLI, and XNLI than on MRPC and TyDi QA, whereas MrXLM is much more fragile on SST-2/SNLI/XNLI at similar target deletions.
 
+![Figure D: Task sensitivity (BERT, gated accuracy)](figures/fig_D_task_sensitivity.png)
+
 ### 4.5 Latency vs accuracy (Pareto frontier)
 
 Using `latency_benchmark.py`, we measure baseline BERT and MrBERT latency on a T4 GPU at sequence length 256. Figure A shows:
@@ -197,6 +238,8 @@ Using `latency_benchmark.py`, we measure baseline BERT and MrBERT latency on a T
 - MrBERT with hard deletion: ~43 ms per batch (example run), corresponding to a **~55% speedup**, while achieving similar or better accuracy on MRPC and SST-2.  
 
 Across runs, the Pareto frontier demonstrates that our gated models can occupy Pareto-superior regions (higher accuracy at the same or lower latency) on several tasks, though not on all (IMDB remains challenging).
+
+![Figure E: Accuracy summary (baseline vs gated)](figures/fig_E_accuracy_summary.png)
 
 ---
 
@@ -207,6 +250,14 @@ Across runs, the Pareto frontier demonstrates that our gated models can occupy P
 To understand whether the model **deletes wisely** on a per-example basis, we compute per-example validation loss and deletion rate and store them in `loss_vs_deletion_<dataset>.json` files. Each contains Pearson and Spearman correlations and a sampled scatter of (loss, deletion rate) pairs.
 
 Figure F (deletion histogram) and Figure G (loss vs deletion scatter) illustrate the distribution of deletion rates and their relationship to loss for MRPC and SST-2.
+
+![Figure F (MRPC): Deletion-rate histogram](figures/fig_F_deletion_hist_mrpc.png)
+
+![Figure F (SST-2): Deletion-rate histogram](figures/fig_F_deletion_hist_sst2.png)
+
+![Figure G (MRPC): Loss vs deletion](figures/fig_G_loss_vs_deletion_mrpc.png)
+
+![Figure G (SST-2): Loss vs deletion](figures/fig_G_loss_vs_deletion_sst2.png)
 
 Key observations (also summarized in Section 3 of `RESULTS_ANALYSIS.md`):
 
@@ -235,9 +286,13 @@ Figure D (task sensitivity heatmap) and Figure H (TyDi QA vs target deletion) su
 
 This analysis suggests that token merging is particularly promising for **classification on short or medium-length sequences**, and more challenging for **extractive QA** without task-specific safeguards (e.g., answer-span protection).
 
+![Figure H: TyDi QA vs target deletion (BERT)](figures/fig_H_tydiqa_sensitivity.png)
+
 ### 5.4 PI controller vs fixed \(\alpha\)
 
 Using the new `--log_deletion_trace` option in `train_mrbert.py`, we log per-step deletion rates for MRPC under PI vs fixed \(\alpha\). Figure B shows that:
+
+![Figure B: Deletion rate vs step (PI vs fixed alpha)](figures/fig_B_deletion_vs_step.png)
 
 - With **PI**, deletion rates start near zero (especially under gate warmup), then gradually converge toward the target deletion with relatively smooth trajectories.  
 - With **fixed \(\alpha\)**, deletion rates can oscillate or overshoot, especially early in training, leading to unstable training dynamics and potentially harming performance.
