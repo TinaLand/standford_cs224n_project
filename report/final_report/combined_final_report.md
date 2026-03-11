@@ -40,7 +40,7 @@ In this project, we implement and adapt the MrT5 delete gate for encoder-only mo
 
 ---
 
-## 2 Contributions and Related Work
+## 2 Related Work
 
 **Our main contributions are:**
 
@@ -184,7 +184,11 @@ Firing the gate after the full encoder layer gives it access to richer contextua
 
 ## 4 Experiments
 
-### 4.1 Datasets and evaluation
+This section describes the data, evaluation protocol, experimental setup, and results.
+
+### 4.1 Data
+
+We use six benchmarks covering classification and extractive QA. The following table summarises each dataset, task type, and the primary metric we report.
 
 | Dataset | Task | Metric |
 |---------|------|--------|
@@ -195,13 +199,17 @@ Firing the gate after the full encoder layer gives it access to richer contextua
 | XNLI | Multilingual NLI (MrXLM) | Val accuracy |
 | TyDi QA | Extractive QA | EM |
 
-Classification: max length 128; TyDi QA / XNLI: 256. HuggingFace datasets; BERT or XLM-R tokeniser.
+All datasets are loaded via HuggingFace (e.g. GLUE for MRPC/SST-2, SNLI, IMDB, XNLI, TyDi QA). We use the standard train/validation splits for each benchmark. For classification we set max sequence length to 128; for TyDi QA and XNLI we use 256. Tokenisation is performed with the corresponding backbone (BERT WordPiece or XLM-R SentencePiece).
 
-### 4.2 Training setup
+### 4.2 Evaluation method
 
-**Backbones:** bert-base-uncased, xlm-roberta-base. **Optimisation:** AdamW, lr \(2\times 10^{-5}\), batch 8 or 24, 1–5 epochs per run. **Deletion:** target ratios 0.3, 0.5, 0.7 (BERT); 0.3, 0.5 (XLM-R); gate warmup 1000–3000 steps. **Hardware:** BERT on NVIDIA L4; XLM-R on Modal A100. Latency measured on T4, batch 16, length 256.
+For classification tasks we report **validation accuracy** (percentage of correct predictions). For TyDi QA we report **Exact Match (EM)** on the development set, with predicted spans remapped to the original tokenisation when using hard deletion (see Section 3.4). We measure **per-example deletion rate** as the fraction of tokens removed by the gate after the selected layer (from the gate’s keep/drop decisions). **Latency** is measured with a fixed batch size and sequence length (e.g. batch 16, length 256) on T4 and A100, averaging over multiple forward passes. Loss–deletion correlation is computed as Pearson and Spearman between per-example deletion rate and per-example cross-entropy loss on the validation set.
 
-### 4.3 Main quantitative results (BERT)
+### 4.3 Experimental details
+
+**Backbones:** bert-base-uncased, xlm-roberta-base. **Optimisation:** AdamW, learning rate \(2\times 10^{-5}\), batch size 8 or 24, 1–5 epochs per run. **Deletion:** target ratios 0.3, 0.5, 0.7 (BERT); 0.3, 0.5 (XLM-R); gate warmup 1000–3000 steps. **Hardware:** BERT runs on NVIDIA L4; XLM-R on Modal A100. Latency is measured on T4 (batch 16, length 256) and on A100 for selected SNLI runs.
+
+### 4.4 Main quantitative results (BERT)
 
 Results are from `results/new/bert_from_l4/` (see `RESULTS_ANALYSIS.md`). Representative findings:
 
@@ -242,7 +250,7 @@ Figure A (Pareto frontier) and Figure E (accuracy summary) show that MrBERT ofte
 
 ![Figure E: Accuracy summary (baseline vs gated)](figures/fig_E_accuracy_summary.png)
 
-### 4.4 Main quantitative results (XLM-R)
+### 4.5 Main quantitative results (XLM-R)
 
 From `results/new/xlmr_from_A100/` we observe a different pattern for XLM-R. At target 0.5 (3 epochs, warmup 1000), MRPC reaches 67.16%, SST-2 52.41%, SNLI 50.74%, IMDB 85.76%, and XNLI 68.07% (no within-run baseline). In the 0.3 (3 epochs, warmup 1500) run with both baseline and gated models, MRPC improves from 68.38% → 72.06%, but SST-2 drops from 79.01% → 61.01%, IMDB from 79.87% → 50.00%, and XNLI from 62.77% → 43.41%; SNLI is poor in both baseline and gated conditions. Overall, **MrXLM is much more fragile than MrBERT** on SST-2/SNLI/IMDB/XNLI at similar deletion targets, and only MRPC shows a clear improvement in the current runs.
 
@@ -262,11 +270,11 @@ Figure D (task sensitivity heatmap) summarises this contrast: BERT can tolerate 
 
 ![Figure D: Task sensitivity (BERT, gated accuracy)](figures/fig_D_task_sensitivity.png)
 
-### 4.5 Latency
+### 4.6 Latency
 
 Our latency profiling spans both edge-class and data-center GPUs. On a T4, baseline BERT takes ~95 ms per batch (sequence length 256, batch 16), whereas MrBERT with hard deletion runs in ~43 ms (**30–55% speedup**, depending on the deletion configuration). On an NVIDIA A100 (SNLI runs from Hiva’s experiments), baseline BERT takes 1.44 ms/sample and MrBERT-30% achieves **1.89×** speedup (0.76 ms/sample), saturating near 2.05× at higher deletion rates. These results demonstrate that the benefits of dynamic token merging scale from commodity inference hardware to high-end accelerators.
 
-### 4.6 Loss–deletion correlation (summary)
+### 4.7 Loss–deletion correlation (summary)
 
 Beyond aggregate accuracies, we also measure how per-example deletion correlates with per-example validation loss. For each (run, dataset) pair where we ran `analyze_loss_vs_deletion`, we compute Pearson/Spearman correlations between deletion rate and cross-entropy loss (see `RESULTS_ANALYSIS.md` for details). Table 4.4 summarises these correlations:
 
@@ -314,13 +322,13 @@ For BERT-base with \(L=12\) and a gate after layer 3, this simplifies to
 \]
 At a keep ratio of \(k \approx 0.70\) (roughly 30% deletion), this yields \(\text{MACs}_\text{rel} \approx 0.66\), corresponding to an expected **34% compute savings**.
 
-Empirically, we observe even larger **wall-clock speedups**. On a T4 GPU, MrBERT achieves **30–55% latency reduction** compared to BERT (Section 4.5); on an A100 (SNLI runs in Table 4.5), baseline BERT runs at 1.44 ms/sample, while MrBERT-30% runs at 0.76 ms/sample (~1.89× speedup) and saturates around 2.05× at higher deletion rates. The gap between theoretical MACs and measured runtime arises because **hard deletion also reduces memory bandwidth and FFN work** on dropped tokens, especially on GPU hardware where memory traffic and dense matmuls dominate. Together, the MACs analysis and latency results show that dynamic token merging yields consistent efficiency gains from theory to practice.
+Empirically, we observe even larger **wall-clock speedups**. On a T4 GPU, MrBERT achieves **30–55% latency reduction** compared to BERT (Section 4.6); on an A100 (SNLI runs in Table 4.5), baseline BERT runs at 1.44 ms/sample, while MrBERT-30% runs at 0.76 ms/sample (~1.89× speedup) and saturates around 2.05× at higher deletion rates. The gap between theoretical MACs and measured runtime arises because **hard deletion also reduces memory bandwidth and FFN work** on dropped tokens, especially on GPU hardware where memory traffic and dense matmuls dominate. Together, the MACs analysis and latency results show that dynamic token merging yields consistent efficiency gains from theory to practice.
 
 Finally, Hiva’s SNLI ablations comparing **soft-only training** versus mixed soft+hard training report a **soft–hard accuracy gap of at most 0.05pp** at convergence. This suggests that training with soft deletion alone is sufficient to yield hard-deletion robustness at inference, and that training–inference skew introduced by the hard-deletion path is negligible in practice.
 
 ### 5.2 Per-example loss vs deletion
 
-Our central analysis question is: **when the model deletes more on a specific example, does its loss tend to increase?** To answer this, we compute per-example validation loss and deletion rate (from `loss_vs_deletion_<dataset>.json`) and study their relationship. Figure F (histograms) and Figure G (scatter plots) visualise the distribution of deletion rates and the loss–deletion correlation; Table 4.4 (Section 4.6) summarises these correlations across runs.
+Our central analysis question is: **when the model deletes more on a specific example, does its loss tend to increase?** To answer this, we compute per-example validation loss and deletion rate (from `loss_vs_deletion_<dataset>.json`) and study their relationship. Figure F (histograms) and Figure G (scatter plots) visualise the distribution of deletion rates and the loss–deletion correlation; Table 4.4 (Section 4.7) summarises these correlations across runs.
 
 Two patterns stand out. First, **loss–deletion correlation is often weaker on SST-2 than on MRPC**: SST-2 is highly redundant, so many tokens can be removed while the model still relies on a small set of sentiment-bearing words, and per-example loss does not always grow with deletion. Second, several MRPC runs and XLM-R SST-2 at 0.3 show **positive Pearson/Spearman correlations** (e.g. MRPC +0.064, XLM-R SST-2 +0.195), indicating that examples with higher deletion tend to have higher loss on those tasks. In these regimes the model is *not* deleting wisely on the hardest examples—over-deletion actively hurts them. Overall, these results support the claim that **over-deletion can harm individual examples**, especially on sensitive tasks, and motivate explicit deletion-rate control.
 
