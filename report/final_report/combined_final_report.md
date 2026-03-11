@@ -38,6 +38,10 @@ The MrT5 paper \cite{kallini2024mrt5} recently proposed Dynamic Token Merging (D
 
 In this project, we implement and adapt the MrT5 delete gate for encoder-only models, building MrBERT and MrXLMR. Our goal is two-fold: **Efficiency**—achieving real wall-clock speedups via hard deletion at inference; and **Accuracy**—treating the delete gate as a learned inductive bias that performs attention sparsification.
 
+---
+
+## 2 Contributions
+
 **Our main contributions are:**
 
 - **Implementation & Adaptation:** We port the DTM mechanism to BERT and XLM-R, supporting both differentiable soft deletion during training and hard deletion (physical sequence shortening) at inference.
@@ -45,16 +49,18 @@ In this project, we implement and adapt the MrT5 delete gate for encoder-only mo
 - **Blending Mechanism for QA:** We introduce a novel pre-deletion blending mechanism that aggregates features from pruned tokens into kept ones, recovering TyDi QA performance from near-zero to 0.35 EM (a \(3.5\times\) improvement).
 - **System Profiling & Analysis:** A comprehensive evaluation across six tasks (SNLI, SQuAD, SST-2, MRPC, IMDB, TyDi QA), including a Pareto frontier analysis showing up to \(1.89\times\) A100 inference speedup (30–55% on T4) and a detailed study of per-example loss-deletion correlations.
 
+**Additionally, our codebase provides:**
+
 - **QA span coordinate remapping:** Under hard deletion, the span head predicts in the *shortened* sequence; we propagate `keep_indices` and `kept_lengths` and remap predicted start/end positions back to the original tokenization so that EM is computed correctly. This deletion map is implemented in `MrBertModel`/`MrXLMRobertaModel` and in `train_mrbert.py` and `scripts/extract_error_cases.py`.
 - **Batch-internal variable length (ragged tensors):** After hard deletion, each example retains a different number of tokens. We use \(\mathrm{max\_kept}\) and `torch.gather` to produce fixed-shape tensors and length masks, enabling efficient batched inference and compatibility with standard pipelines.
 - **Gate warmup and two-phase schedule:** We expose `--gate_warmup_steps` and an optional Phase A/B schedule so that the gate regularizer is zero for the first \(N\) steps; this stabilizes training on TyDi QA and XLM-R and avoids early collapse.
 - **XLM-R rescue strategies and linguistic analysis:** We expose `--gate_layer_index`, `--gate_threshold_ratio`, `--controller_kp`/`--controller_ki`, and `--gate_warmup_steps`, and we analyze why XLM-R is more fragile (SentencePiece subword granularity). Our runs in `results/new/xlmr_from_A100/` summarize these ablations.
-- **Per-example loss–deletion pipeline:** We compute per-example validation loss and deletion rate and write `loss_vs_deletion_<dataset>.json` (Pearson/Spearman, scatter samples) and extract high-deletion error cases into `error_cases_*.jsonl` via `scripts/extract_error_cases.py`, supporting Figure F/G and the “deletes wisely?” analysis in Section 5.
+- **Per-example loss–deletion pipeline:** We compute per-example validation loss and deletion rate and write `loss_vs_deletion_<dataset>.json` (Pearson/Spearman, scatter samples) and extract high-deletion error cases into `error_cases_*.jsonl` via `scripts/extract_error_cases.py`, supporting Figure F/G and the “deletes wisely?” analysis in Section 6.
 - **Latency benchmark and Pareto/task-sensitivity figures:** We provide `latency_benchmark.py` and `scripts/plot_mrbert_figures.py` to produce Figure A (Pareto frontier), Figure D (task sensitivity heatmap), Figure E (accuracy summary), Figure H (TyDi QA curve), and PI vs fixed-\(\alpha\) traces (Figure B), with results rooted in `results/new/` and `RESULTS_ANALYSIS.md`.
 
 ---
 
-## 2 Related Work
+## 3 Related Work
 
 **MrT5 \\cite{kallini2024mrt5}.** The direct antecedent of this work. MrT5 attaches a scalar delete gate after a selected encoder layer of a T5-based byte-level model. A PI controller adjusts the deletion loss coefficient \\(\\alpha\\) to track a target deletion rate, achieving 50–60% sequence reduction with minimal degradation. We implement and adapt this mechanism for subword-based, encoder-only BERT and XLM-R, introducing a novel blending mechanism to handle discriminative tasks like extractive QA.
 
@@ -68,7 +74,7 @@ In this project, we implement and adapt the MrT5 delete gate for encoder-only mo
 
 ---
 
-## 3 Approach
+## 4 Approach
 
 ### 3.1 Architecture overview
 
@@ -153,7 +159,7 @@ XLM-R uses SentencePiece, which often splits a word into several subwords; delet
 - **Controller gains and warmup (`--controller_kp`, `--controller_ki`, `--gate_warmup_steps`)**: use slower PI warmup and longer deletion warmup (e.g. 3000 steps) to avoid early over-deletion.  
 - **Gate threshold ratio (`--gate_threshold_ratio`)**: increase the keep threshold (e.g. 0.6–0.7) to make hard deletion less aggressive.
 
-These flags are wired through `train_mrbert.py` and `run_xlmr_modal.py`, and the resulting ablations are summarised in Section 4 and in `results/new/xlmr_from_A100/`.
+These flags are wired through `train_mrbert.py` and `run_xlmr_modal.py`, and the resulting ablations are summarised in Section 5 and in `results/new/xlmr_from_A100/`.
 
 ### 3.6 Key differences from MrT5
 
@@ -178,7 +184,7 @@ Firing the gate after the full encoder layer gives it access to richer contextua
 
 ---
 
-## 4 Experiments
+## 5 Experiments
 
 ### 4.1 Datasets and evaluation
 
@@ -292,11 +298,11 @@ Beyond aggregate accuracies, we also measure how per-example deletion correlates
 | XLM-R A100, 0.3 (3ep, warmup 1500)| SNLI    | −0.006  | +0.015   | Near zero                                |
 | XLM-R A100, 0.3 (3ep, warmup 1500)| XNLI    | +0.011  | +0.070   | Weak positive                            |
 
-Overall, positive correlations (e.g. BERT MRPC, XLM-R SST-2 at 0.3) support the claim that **over-deletion hurts individual examples**: examples with higher deletion tend to have higher loss. Near-zero or slightly negative correlations suggest that the gate is either deleting relatively uninformative tokens or that the signal is noisy. Section 5.1 builds on this table to discuss when the model “deletes wisely” and how this interacts with task redundancy and sensitivity.
+Overall, positive correlations (e.g. BERT MRPC, XLM-R SST-2 at 0.3) support the claim that **over-deletion hurts individual examples**: examples with higher deletion tend to have higher loss. Near-zero or slightly negative correlations suggest that the gate is either deleting relatively uninformative tokens or that the signal is noisy. Section 6.1 builds on this table to discuss when the model “deletes wisely” and how this interacts with task redundancy and sensitivity.
 
 ---
 
-## 5 Analysis
+## 6 Analysis
 
 ### 5.1 Accuracy–efficiency tradeoff: theoretical vs. measured
 
@@ -310,13 +316,13 @@ For BERT-base with \(L=12\) and a gate after layer 3, this simplifies to
 \]
 At a keep ratio of \(k \approx 0.70\) (roughly 30% deletion), this yields \(\text{MACs}_\text{rel} \approx 0.66\), corresponding to an expected **34% compute savings**.
 
-Empirically, we observe even larger **wall-clock speedups**. On a T4 GPU, MrBERT achieves **30–55% latency reduction** compared to BERT (Section 4.5); on an A100 (SNLI runs in Table 4.5), baseline BERT runs at 1.44 ms/sample, while MrBERT-30% runs at 0.76 ms/sample (~1.89× speedup) and saturates around 2.05× at higher deletion rates. The gap between theoretical MACs and measured runtime arises because **hard deletion also reduces memory bandwidth and FFN work** on dropped tokens, especially on GPU hardware where memory traffic and dense matmuls dominate. Together, the MACs analysis and latency results show that dynamic token merging yields consistent efficiency gains from theory to practice.
+Empirically, we observe even larger **wall-clock speedups**. On a T4 GPU, MrBERT achieves **30–55% latency reduction** compared to BERT (Section 5.5); on an A100 (SNLI runs in Table 4.5), baseline BERT runs at 1.44 ms/sample, while MrBERT-30% runs at 0.76 ms/sample (~1.89× speedup) and saturates around 2.05× at higher deletion rates. The gap between theoretical MACs and measured runtime arises because **hard deletion also reduces memory bandwidth and FFN work** on dropped tokens, especially on GPU hardware where memory traffic and dense matmuls dominate. Together, the MACs analysis and latency results show that dynamic token merging yields consistent efficiency gains from theory to practice.
 
 Finally, Hiva’s SNLI ablations comparing **soft-only training** versus mixed soft+hard training report a **soft–hard accuracy gap of at most 0.05pp** at convergence. This suggests that training with soft deletion alone is sufficient to yield hard-deletion robustness at inference, and that training–inference skew introduced by the hard-deletion path is negligible in practice.
 
 ### 5.2 Per-example loss vs deletion
 
-Our central analysis question is: **when the model deletes more on a specific example, does its loss tend to increase?** To answer this, we compute per-example validation loss and deletion rate (from `loss_vs_deletion_<dataset>.json`) and study their relationship. Figure F (histograms) and Figure G (scatter plots) visualise the distribution of deletion rates and the loss–deletion correlation; Table 4.4 (Section 4.6) summarises these correlations across runs.
+Our central analysis question is: **when the model deletes more on a specific example, does its loss tend to increase?** To answer this, we compute per-example validation loss and deletion rate (from `loss_vs_deletion_<dataset>.json`) and study their relationship. Figure F (histograms) and Figure G (scatter plots) visualise the distribution of deletion rates and the loss–deletion correlation; Table 4.4 (Section 5.6) summarises these correlations across runs.
 
 Two patterns stand out. First, **loss–deletion correlation is often weaker on SST-2 than on MRPC**: SST-2 is highly redundant, so many tokens can be removed while the model still relies on a small set of sentiment-bearing words, and per-example loss does not always grow with deletion. Second, several MRPC runs and XLM-R SST-2 at 0.3 show **positive Pearson/Spearman correlations** (e.g. MRPC +0.064, XLM-R SST-2 +0.195), indicating that examples with higher deletion tend to have higher loss on those tasks. In these regimes the model is *not* deleting wisely on the hardest examples—over-deletion actively hurts them. Overall, these results support the claim that **over-deletion can harm individual examples**, especially on sensitive tasks, and motivate explicit deletion-rate control.
 
@@ -356,7 +362,7 @@ At the same time, MrXLM’s larger accuracy drop under similar gate settings ind
 
 ---
 
-## 6 Conclusion
+## 7 Conclusion
 
 We demonstrated that the Dynamic Token Merging delete gate from MrT5 transfers to encoder-only discriminative NLU. **Key findings:**
 
@@ -373,7 +379,7 @@ We demonstrated that the Dynamic Token Merging delete gate from MrT5 transfers t
 
 ---
 
-## 7 Team Contributions
+## 8 Team Contributions
 
 - **Hiva Zaad**: [1–2 sentences]  
 - **Alina Tianhui Huang**: [1–2 sentences]  
@@ -381,7 +387,7 @@ We demonstrated that the Dynamic Token Merging delete gate from MrT5 transfers t
 
 ---
 
-## 8 Late Days
+## 9 Late Days
 
 _State how many late days, if any, and which team members contribute them. Otherwise, state that you are not using late days._
 
