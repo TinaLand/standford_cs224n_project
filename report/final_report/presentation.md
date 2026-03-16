@@ -1,46 +1,11 @@
-github:
-tianhui/alina huang: https://github.com/TinaLand/standford_cs224n_project
-Hiva Zaad: https://github.com/HivaMohammadzadeh1/CS224N-project
-
 ---
 
-## 0. This repo: implementation, architecture, and key decisions
+github:
+repo1(tianhui/alina huang): https://github.com/TinaLand/standford_cs224n_project
+repo2(Hiva Zaad): https://github.com/HivaMohammadzadeh1/CS224N-project
 
-### 0.1 What this repo does
 
-- **MrBERT / MrXLM**: Adaptation of **dynamic token merging (DTM)** from MrT5 (ICLR 2025) onto **BERT** and **XLM-RoBERTa**. A learned **delete gate** after a fixed encoder layer outputs per-token scores G ∈ [k, 0] (k = −30); “deleted” tokens are softly masked in training and physically removed at inference to shorten the sequence and save compute.
-- **Training**: **Soft deletion** — gate values are added to attention logits in subsequent layers (differentiable). **Inference**: **Hard deletion** — keep only tokens with G above threshold (e.g. k/2), then run the rest of the encoder on the shortened sequence.
-- **Reference**: [README](https://github.com/TinaLand/standford_cs224n_project) and paper “MergeT5: Dynamic Token Merging for Efficient Byte-Level Language Models” (Kallini et al., ICLR 2025).
-
-### 0.2 Repo layout and key files
-
-| Role | Path | Purpose |
-|------|------|--------|
-| **Gate + encoder** | `mrbert/modeling_mrbert.py` | `DeleteGate`, `softmax1`, `_run_layer_with_soft_gate`, `MrBertModel` (soft/hard deletion, keep_indices for QA). |
-| **Config** | `mrbert/configuration_mrbert.py` | `MrBertConfig`: `gate_layer_index`, `gate_k`, `gate_threshold_ratio`, `use_softmax1`, PI params. |
-| **PI controller** | `mrbert/pi_controller.py` | `PIController.step(gate, gate_k)` → α for L = L_task + α·L_deletion; targets a deletion ratio. |
-| **XLM-R** | `mrbert/modeling_mrxlm.py` | Reuses `DeleteGate` and soft-gate logic; `MrXLMRobertaModel`, classification/QA heads. |
-| **RoBERTa** | `mrbert/modeling_mrroberta.py` | RoBERTa + same `DeleteGate` (for demos). |
-| **Training** | `train_mrbert.py` | `--dataset`, `--backbone` (bert/xlmr), `--gate_layer_index`, `--use_pi`, `--target_deletion`, `--gate_warmup_steps`, etc. |
-| **Exports** | `mrbert/__init__.py` | `MrBertConfig`, `MrBertModel`, `MrBertForSequenceClassification`, `MrBertForQuestionAnswering`, `MrXLMRoberta*`, `MrRobertaModel`. |
-
-### 0.3 Delete gate: modules and flow
-
-The **delete gate** is implemented as follows (code refs point to this repo):
-
-| Component | Module / location | Description |
-|-----------|-------------------|-------------|
-| **Gate module** | `DeleteGate` in `mrbert/modeling_mrbert.py` (class around L23–38) | `nn.Module`: LayerNorm → Linear(hidden_size→1) → bias → `G = gate_k * sigmoid(logits)`. Output shape `(batch, seq_len)`, values in [gate_k, 0]. Only ~2.3K extra parameters. |
-| **Soft deletion** | `_run_layer_with_soft_gate()` in `modeling_mrbert.py` | Runs one encoder layer with gate as **attention bias**: `attention_scores += gate_broadcast`, then `softmax1` (or softmax). Used for layers after the gate when `use_soft_deletion=True`. |
-| **Softmax1** | `softmax1()` in `modeling_mrbert.py` | Eq.(7): `exp(x_i) / (1 + Σ_j exp(x_j))` so that when all G = k, attention does not collapse. |
-| **Hard deletion** | Inside `MrBertModel._encoder_forward_with_gate()` when `use_soft_deletion=False` | Threshold = `gate_k * gate_threshold_ratio`; keep indices where G > threshold; `torch.gather` to shorten sequence; new attention mask; `keep_indices` / `kept_lengths` for QA span remapping. |
-| **Regularizer** | `MrBertModel.get_gate_regularizer_loss(gate)` | L_G = mean(gate); added as α·L_G to task loss. |
-| **α schedule** | `PIController` in `mrbert/pi_controller.py` | `step(gate, gate_k)` → current deletion ratio → error → P/I update → α = max(0, kp*P + ki*I). Used in `train_mrbert.py` when `--use_pi`. |
-
-So the “delete gate” is not a single file but: **(1)** the `DeleteGate` **module** in `modeling_mrbert.py`, **(2)** the **soft** path (`_run_layer_with_soft_gate` + `softmax1`), **(3)** the **hard** path (mask + gather in `_encoder_forward_with_gate`), and **(4)** the **PIController** that sets α. BERT and XLM-R both use the same `DeleteGate` class; RoBERTa wrapper in `modeling_mrroberta.py` also reuses it.
-
-### 0.4 Key design decisions (and where they live in code)
-
+## 0. Key gate design decisions
 | Decision | Choice | Where |
 |----------|--------|--------|
 | **Gate position** | After a fixed encoder layer (default layer 3). | `MrBertConfig.gate_layer_index`; `_encoder_forward_with_gate` runs layers 0..L then gate then rest. |
@@ -48,26 +13,7 @@ So the “delete gate” is not a single file but: **(1)** the `DeleteGate` **mo
 | **PI controller** | Optional; targets a deletion ratio instead of fixed α. | `train_mrbert.py` with `--use_pi`; `PIController.step()` each batch. |
 | **Gate warmup** | Delay gate regularizer for N steps to stabilize. | `--gate_warmup_steps` (e.g. 1000); α set to 0 until step N. |
 | **QA** | Span prediction on shortened sequence; map back to original indices. | `keep_indices` / `kept_lengths` in `MrBertForQuestionAnswering` / `MrXLMRobertaForQuestionAnswering` for span coordinate remapping. |
-| **Pre-deletion blending** | Not implemented in this repo. | Report describes blending for TyDi/SQuAD; code uses only span remap + warmup → ~0.28 EM vs report 0.35 with blending. |
 
-*All paths and names above refer to this repo and are present in the codebase (e.g. `mrbert/modeling_mrbert.py`, `mrbert/pi_controller.py`, `mrbert/configuration_mrbert.py`, `train_mrbert.py`).*
-
-### 0.5 BERT vs XLM-R: implementation and same/different
-
-| Aspect | BERT (MrBERT) | XLM-R (MrXLM) | Same? |
-|--------|----------------|---------------|--------|
-| **Backbone** | `BertModel` / `BertLayer` | `XLMRobertaModel` / `RobertaLayer` | No (different HF models). |
-| **Config** | `MrBertConfig` (extends `BertConfig`) in `configuration_mrbert.py` | `XLMRobertaConfig` with extra attrs (`gate_k`, `gate_layer_index`, etc.) set in code | No (BERT has a dedicated config class; XLM-R attaches gate params to base config). |
-| **Gate module** | `DeleteGate(config)` in `MrBertModel` | Same `DeleteGate(config)` imported from `modeling_mrbert.py` | **Yes** — same class, same forward (LayerNorm → Linear → G = gate_k * sigmoid). |
-| **Soft deletion** | `_run_layer_with_soft_gate(layer, ...)` with `BertLayer` | Same `_run_layer_with_soft_gate(layer, ...)` with `RobertaLayer` (same interface: attention.self, intermediate, output) | **Yes** — same function from `modeling_mrbert.py`. |
-| **Hard deletion** | In `MrBertModel._encoder_forward_with_gate`: threshold, keep_masks, `torch.gather`, `keep_indices`/`kept_lengths` | Same logic in `MrXLMRobertaModel._encoder_forward_with_gate` | **Yes** — same contract (keep_indices, kept_lengths for QA remapping). |
-| **Regularizer** | `get_gate_regularizer_loss(gate) = gate.mean()` | Same in `MrXLMRobertaModel` | **Yes**. |
-| **Loading** | `MrBertModel.from_pretrained_bert(bert_name_or_path)` | `MrXLMRobertaModel.from_pretrained_xlm(pretrained_name_or_path, gate_layer_index=..., gate_k=..., ...)` | No (different constructors). |
-| **Task heads** | `MrBertForSequenceClassification`, `MrBertForQuestionAnswering` in `modeling_mrbert.py` | `MrXLMRobertaForSequenceClassification`, `MrXLMRobertaForQuestionAnswering` in `modeling_mrxlm.py` | Same *design* (encoder + gate + head); different file and backbone. |
-
-**Summary:** BERT and XLM-R **share** the same **DeleteGate** module, **soft** path (`_run_layer_with_soft_gate` + `softmax1`), **hard** path (mask + gather + keep_indices), and **gate regularizer**. They **differ** in backbone (Bert vs XLMRoberta), config (MrBertConfig vs XLMRobertaConfig + attrs), and loading API. Training is unified via `train_mrbert.py --backbone bert|xlmr`.
-
----
 
 ## 1. Summary
 
@@ -363,7 +309,3 @@ The **conclusions** are given **immediately after each table** in Section 6 (Con
 4. **Blending is critical for QA.** TyDi 0.10 (no blend) → 0.30 (blend L3) → 0.35 (blend L9) in Hiva's data; we get 0.28 without blending. The **0.07 EM gap** is explained by **pre-deletion blending + gate layer**, not hardware.
 5. **Actual deletion rate does not alone predict accuracy.** MRPC (Hiva): 5.7% deletion but −17 pp; SNLI (us): 76% deletion but 89% accuracy. So **task structure and optimization** matter as much as deletion magnitude.
 6. **XLM-R on A100:** Same GPU, different baselines and outcomes—confirms that **training setup** (epochs, data, seed, gate/controller) drives the numbers; GPU does not change accuracy.
-
----
-
-*Generated from comparison of the report(s), this codebase, `RESULTS_ANALYSIS.md`, and `alina_version_FINAL_REPORT.md`. Data in Section 6 from `results/new/bert_from_l4/`, `results/new/xlmr_from_A100/`, and Hiva’s final submission PDF. Content of `ALINA_VS_HIVA_RESULTS_COMPARISON.md` and `DEEP_DATA_ANALYSIS.md` is integrated here (Section 6–8); extra SNLI ablations in Conclusion 6.1; detailed analysis tables in Section 6.4.*
