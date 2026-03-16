@@ -1,10 +1,10 @@
 GitHub:
-- **Alina Huang (this repo)**: `https://github.com/TinaLand/standford_cs224n_project`
-- **Hiva Zaad**: `https://github.com/HivaMohammadzadeh1/CS224N-project`
+- **repo1: Alina Huang (this repo)** `https://github.com/TinaLand/standford_cs224n_project`
+- **repo2: Hiva Zaad**: `https://github.com/HivaMohammadzadeh1/CS224N-project`
 
 ---
 
-## 0. Key gate design decisions
+## 1. Key gate design decisions
 | Decision | Choice | Where |
 |----------|--------|--------|
 | **Gate position** | After a fixed encoder layer (default layer 3). | `MrBertConfig.gate_layer_index`; `_encoder_forward_with_gate` runs layers 0..L then gate then rest. |
@@ -13,16 +13,11 @@ GitHub:
 | **Gate warmup** | Delay gate regularizer for N steps to stabilize. | `--gate_warmup_steps` (e.g. 1000); α set to 0 until step N. |
 | **QA** | Span prediction on shortened sequence; map back to original indices. | `keep_indices` / `kept_lengths` in `MrBertForQuestionAnswering` / `MrXLMRobertaForQuestionAnswering` for span coordinate remapping. |
 
-
-## 1. Summary
-
----
-
-## 2. What Matches (Report ↔ Code)
+## 2. What Matches (repo2 ↔ repo1)
 
 At a high level, our implementation matches Hiva's report in four areas: **model structure, control rules, QA handling, and tasks/metrics**.
 
-| Category | What Hiva describes | What this repo does | Note |
+| Category | Repo2 | Repo1 | Note |
 |----------|---------------------|---------------------|------|
 | **Model + gate** | Delete gate after encoder layer 3; LayerNorm → Linear(768→1) → Sigmoid · k (k = −30); soft deletion = add G as attention bias; hard deletion = remove tokens with G < k/2; keep [CLS]/[SEP], delete [PAD]. | `DeleteGate` in `mrbert/modeling_mrbert.py` with `gate_layer_index=3`, `gate_k=-30`; `_run_layer_with_soft_gate` adds gate to attention scores; hard path in `_encoder_forward_with_gate` thresholds at `gate_k * gate_threshold_ratio` (k/2), keeps CLS, gathers kept tokens, rebuilds the attention mask. | **Core mechanism is fully aligned**; differences come later from init / PI hyperparameters / QA blending. |
 | **PI controller + loss** | L = L_task + α·L_deletion, L_deletion = mean(G); α_t updated by a PI controller: error e_t = δ − r_t, P/I updates, α_t = max(0, p_t + i_t); γ=0.9 for EMA. | `get_gate_regularizer_loss(gate)=gate.mean()`; `PIController.step()` implements the same rule: compute error from current deletion ratio, update P/I, set α = max(0, kp*P + ki*I) with default `pi_gamma=0.9`. | **Control logic matches**; the only difference is the default `kp` (report: 0.01, this repo: 0.5). |
@@ -31,79 +26,59 @@ At a high level, our implementation matches Hiva's report in four areas: **model
 
 ---
 
-## 3. Mismatches or Missing in Code
+## 3. Mismatches
 
 ### 3.1 Pre-deletion blending (in report, not in code)
 
-| Item | Report | Code |
+| Item | Repo2 | Repo1 |
 |------|--------|------|
 | **Formula** | w_i = clamp(-g_i/30, 0, 1); h̃_i = (1−w_i)·h_i^(L) + w_i·h_i^(gate) | **Not implemented**: no `blend` in repo |
 | **Role** | Blend deleted tokens with pre-gate representation to avoid QA representation collapse; TyDi EM 0.10 → 0.35 | TyDi in code uses only span remapping + gate warmup; no blending. TyDi in `RESULTS_ANALYSIS`/combined report ~0.28 EM (0.35 from report/other runs) |
-| **Impact** | Report lists pre-deletion blending as a key contribution for SQuAD/TyDi (0.10 → 0.35 EM) | In our repo, *not* implementing blending gives a clean ablation: TyDi stays at ~0.28 EM, which empirically shows that blending is **necessary** to fully recover QA performance and match the report |
+| **Impact** | Report lists “Pre-deletion blending” as a contribution and critical for SQuAD/TyDi | To match report’s QA experiments, blending must be added to this repo |
 
 ### 3.2 Gate initialization
 
-| Item | Report | Code |
+| Item | Repo2 | Repo1 |
 |------|--------|------|
 | **Linear layer** | W ~ N(0, 0.02), b = 10.0; initial g≈-0.001, almost no deletion | `DeleteGate`: Linear uses default PyTorch init; **bias is `nn.Parameter(torch.zeros(1))` (b=0)**, not 10 |
-| **Impact** | Report uses b=10 to keep the gate initially very close to the pretrained baseline (almost no deletion); this makes training stable and isolates the effect of the regularizer/PI | Our default b=0 is a more aggressive ablation: it shows that if the gate starts too active, early layers are less stable and we have to rely more on warmup/PI; this highlights **why** the conservative init in the report is a sensible design |
+| **Impact** | Report uses b=10 for very conservative initial deletion; code may delete more initially, relying on warmup/PI to recover | To match report: init linear with N(0, 0.02) and set bias=10 in `DeleteGate` |
 
 ### 3.3 PI hyperparameters
 
-| Item | Report | Code default |
+| Item | Repo2 | Repo1 |
 |------|--------|--------------|
 | **k_p, k_i** | k_p = 0.01, k_i = 10^−5 | `train_mrbert.py`: `--controller_kp` default **0.5**, `--controller_ki` default 1e-5 |
-| **Impact** | The report’s smaller k_p (0.01) makes α evolve slowly and stably toward the target deletion; our larger default k_p=0.5 makes the controller much more responsive (and sometimes oscillatory) | This difference effectively serves as a PI ablation: we see that aggressive k_p can hit the target faster but is less stable, which *motivates* the report’s more conservative choice; we can exactly match the report by setting `--controller_kp 0.01` |
+| **Impact** | Report uses smaller k_p; code default k_p is larger, so PI reacts more aggressively | Can align with report via `--controller_kp 0.01` |
 
 ### 3.4 Training and data settings
 
-| Item | Report | Code default / implementation |
+| Item | Repo2 | Repo1 |
 |------|--------|--------------------------------|
 | **Max length** | SNLI 128; SQuAD/TyDi 384 stride 128; IMDB 512 | `--max_length` default **128**; no per-task 384/512 |
 | **Batch** | 32 (classification), 16 (QA) | Default **16**; not task-specific |
 | **Epoch** | 3 (5 for MRPC) | Default **3**; no special case for MRPC |
-| **Gate lr** | Gate lr = 10^−4 (separate from backbone) | **Not implemented**: optimizer does not use a separate lr for gate parameters; this gives us a baseline where gate and backbone share lr, and lets us treat the separate gate lr in the report as an additional ablation knob rather than a hard requirement |
-| **Regulariser delay** | 1000 steps (100 for TyDi) | `--gate_warmup_steps` exists (default 0); by toggling it between 0 and 1000/100 we can reproduce the report’s schedule and also see how much stability comes purely from delaying the regularizer |
+| **Gate lr** | Gate lr = 10^−4 (separate from backbone) | **Not implemented**: optimizer does not use a separate lr for gate parameters |
+| **Regulariser delay** | 1000 steps (100 for TyDi) | `--gate_warmup_steps` exists, default 0; can set 1000/100 |
 | **Hardware / env** | A100 via Modal, fp16 | This repo’s BERT: **L4**; XLM-R: **A100** (Modal). Latency: T4. |
 
 ### 3.5 Experiment and result sources
 
-| Item | Report | Code / results |
+| Item | Repo2 | Repo1 |
 |------|--------|----------------|
 | **SNLI table** | A100: baseline 90.48%, MrBERT-30% 90.21%, 1.89× speedup, etc. | Our BERT: **L4** (1 ep, warmup); see Section 6 for side-by-side numbers. |
 | **SQuAD** | Report includes SQuAD curves and “without blending does not converge” | This repo’s main results do not include SQuAD; combined report states SQuAD was not run |
-| **TyDi + blending** | Gate at layer 9 + pre-deletion blending → EM 0.35 | Our current runs (no blending, gate at L3) sit at ~0.28 EM; this gap is precisely the ablation evidence that blending + deeper gate **matter** for QA, and defines the target for future code changes |
+| **TyDi + blending** | Layer 9 + blending → EM 0.35 | No blending in code; TyDi here from span remap + warmup, ~0.28 EM |
 | **GitHub** | Report: Code: https://github.com/HivaMohammadzadeh1/CS224N-project/tree/main | Whether this is the same repo is unclear; if same, report may refer to a different branch or script set |
 
 ---
 
+## 4. Concrete data comparison
 
-## 5. Recommendations to Align Report and Code
+### 4.1 BERT (MrBERT): Repo2 vs Repo1
 
-1. **Implement pre-deletion blending**  
-   In `MrBertModel` / `MrXLMRobertaModel`, for the QA path after the gate and before later layers, apply report Eq.(3) to blend hidden states (using pre-gate representation), then use the blended representation in `MrBertForQuestionAnswering` for span prediction.
+Our BERT runs are on **L4** (1 epoch, batch 24, gate warmup 1000, target 0.3 or 0.5). Repo2 uses **A100** (3 epochs, batch 32, gate lr 10⁻⁴, weight decay 0.01, etc.). **Accuracy is not determined by GPU** (same model → same accuracy on same inputs); the differences below come from **training setup** (epochs, init, blending, data length, etc.).
 
-2. **Align hyperparameters and init**  
-   - Gate: init linear with N(0, 0.02), bias=10.  
-   - PI: default or document `--controller_kp 0.01`.  
-   - Optional: set `--max_length` per task (e.g. TyDi 256/384), `--batch_size` 32 for classification, MRPC `--epochs 5`.
-
-3. **Optional: separate learning rate for gate**  
-   In `train_mrbert.py`, add a separate param_group for gate parameters with lr=1e-4 to match report “gate lr=10^−4”.
-
-4. **Document in README or this file**  
-   - Current code **does not** include pre-deletion blending; report’s TyDi 0.35 EM and SQuAD discussion refer to the “with blending” setup.  
-   - This repo’s main results are from `results/new/` (L4 BERT, A100 XLM-R; T4 latency); report tables partly from Hiva’s A100 runs; compare numbers only when setups are clear.
-
----
-
-## 6. Concrete data comparison
-
-### 6.1 BERT (MrBERT): Codebase L4 vs Hiva A100
-
-Our BERT runs are on **L4** (1 epoch, batch 24, gate warmup 1000, target 0.3 or 0.5). Hiva’s report uses **A100** (3 epochs, batch 32, gate lr 10⁻⁴, weight decay 0.01, etc.). **Accuracy is not determined by GPU** (same model → same accuracy on same inputs); the differences below come from **training setup** (epochs, init, blending, data length, etc.).
-
-| Dataset | Codebase (L4): baseline | Codebase (L4): MrBERT | Codebase actual del% | Hiva (A100): baseline | Hiva (A100): MrBERT-30% | Hiva actual del% |
+| Dataset | Repo1 (L4): baseline | Repo1 (L4): MrBERT | Repo1 actual del% | Repo2 (A100): baseline | Repo2 (A100): MrBERT-30% | Repo2 actual del% |
 |---------|--------------------------|------------------------|------------------------|------------------------|--------------------------|-------------------|
 | **SNLI** | 74.00% (0.3 run) | **89.02%** | 76.1% | **90.48%** | **90.21%** | 30.8% |
 | **SNLI** (0.5) | 60.32% | **88.78%** | 76.2% | — | — | — |
@@ -117,11 +92,11 @@ Our BERT runs are on **L4** (1 epoch, batch 24, gate warmup 1000, target 0.3 or 
 
 **Conclusion (6.1):** Baseline gaps (our L4 1 ep vs Hiva A100 3–5 ep) are **+16 to +29 pp** on SNLI/SST-2/MRPC—due to **epochs/schedule**, not GPU. **Delta from baseline:** we get **+15 to +25 pp** on SNLI/SST-2 (gate corrects weak baseline); Hiva gets **−0.27 to −0.62 pp** (gate preserves strong baseline). MRPC: we are flat; Hiva −17.32 pp despite only 5.7% deletion → task/setup sensitivity. TyDi: we **+7.98 pp EM** without blending (~0.28); Hiva 0.35 EM with blending → **blending + L9** explains the gap. *From Hiva’s report (SNLI ablations):* MrBERT-0% 90.50%, Random 30% 87.26%, No-PI 30% 86.47% (88.9% del)—PI is needed; random deletion underperforms.
 
-### 6.2 XLM-R (MrXLM): Direct comparison (both A100)
+### 4.2 XLM-R (MrXLM): Direct comparison (both A100)
 
-**Both our codebase and Hiva’s XLM-R runs use A100** (ours: `results/new/xlmr_from_A100/`). So we can compare **accuracy and deletion** directly; any difference is from **implementation and hyperparameters** (blending, gate init, gate lr, warmup, epochs, etc.), not from GPU.
+**Both repo1 and repo2 use A100** (ours: `results/new/xlmr_from_A100/`). So we can compare **accuracy and deletion** directly; any difference is from **implementation and hyperparameters** (blending, gate init, gate lr, warmup, epochs, etc.), not from GPU.
 
-| Dataset | Codebase (A100): baseline | Codebase (A100): MrXLM 0.3 | Note (codebase) | Hiva (A100): baseline | Hiva (A100): MrXLMR-30% | Note (Hiva) |
+| Dataset | Repo1 (A100): baseline | Repo1 (A100): MrXLM 0.3 | Note (codebase) | Repo2 (A100): baseline | Repo2 (A100): MrXLMR-30% | Note (Hiva) |
 |---------|----------------------------|----------------------------|-----------------|------------------------|--------------------------|-------------|
 | **MRPC** | 68.38% | **72.06%** | MrXLM improves | — | — | — |
 | **SST-2** | 79.01% | 61.01% | Large drop with gate | — | — | — |
@@ -129,22 +104,22 @@ Our BERT runs are on **L4** (1 epoch, batch 24, gate warmup 1000, target 0.3 or 
 | **IMDB** | 79.87% | 50.00% | Large drop | — | — | — |
 | **XNLI** | 62.77% | 43.41% | Large drop | — | — | — |
 
-**Conclusion (6.2):** Same GPU (A100) but **baseline levels differ sharply** (e.g. SNLI 33.82% vs 89.85% → 56 pp gap): our XLM-R run is underconverged or different split/settings. **Gate effect:** we get **+3.68 pp** on MRPC; **−18 to −30 pp** on SST-2/IMDB/XNLI; Hiva SNLI **−7.58 pp**. So **XLM-R + gate is task-dependent and more fragile than BERT**; only MRPC (our run) shows a clear gain.
+**Conclusion (6.2):** Same GPU (A100) but **baseline levels differ sharply** (e.g. SNLI 33.82% vs 89.85% → 56 pp gap): our XLM-R run is underconverged or different split/settings. **Gate effect:** we get **+3.68 pp** on MRPC; **−18 to −30 pp** on SST-2/IMDB/XNLI; Repo2 SNLI **−7.58 pp**. So **XLM-R + gate is task-dependent and more fragile than BERT**; only MRPC (our run) shows a clear gain.
 
-### 6.3 Inference latency (GPU does matter here)
+### 4.3 Inference latency (GPU does matter here)
 
 | Source | GPU | Baseline | MrBERT-30% | Speedup |
 |--------|-----|----------|------------|---------|
-| **Codebase** | **T4** (batch 16, seq 256) | ~95 ms/batch | ~43 ms/batch | **~30–55%** |
-| **Hiva (report)** | **A100** | 1.440 ms/sample | 0.763 ms/sample | **1.89×** |
+| **Repo1** | **T4** (batch 16, seq 256) | ~95 ms/batch | ~43 ms/batch | **~30–55%** |
+| **Repo2 (report)** | **A100** | 1.440 ms/sample | 0.763 ms/sample | **1.89×** |
 
 **Conclusion (6.3):** **GPU determines latency**, not accuracy. A100 is much faster than T4; both speedup numbers are valid for their hardware. For the same model and batch/seq, relative speedup would be comparable; absolute ms/sample lower on A100.
 
-### 6.4 Detailed analysis tables
+### 4.4 Detailed analysis tables
 
-#### 6.4.1 Baseline gap (codebase L4 vs Hiva A100)
+#### 4.4.1 Baseline gap (codebase L4 vs Hiva A100)
 
-| Dataset | Codebase baseline (L4, 1 ep) | Hiva baseline (A100) | Gap (pp) | Interpretation |
+| Dataset | Repo1 baseline (L4, 1 ep) | Repo2 baseline (A100) | Gap (pp) | Interpretation |
 |---------|------------------------------|------------------------|----------|----------------|
 | SNLI    | 74.00%                       | 90.48%                 | **+16.48** | 1 epoch vs 3 epochs (and possibly different data order/seed). Most of the SNLI gap is from **training length**, not GPU. |
 | SST-2   | 67.89%                       | 97.29%                 | **+29.40** | Very large: our 1-ep baseline is far from converged; Hiva's is near ceiling. |
@@ -153,9 +128,9 @@ Our BERT runs are on **L4** (1 epoch, batch 24, gate warmup 1000, target 0.3 or 
 
 **Takeaway:** The **16–29 pp** baseline gaps on SNLI/SST-2/MRPC are overwhelmingly due to **epoch count and training schedule** (1 ep vs 3–5 ep), not L4 vs A100. Comparing **gated accuracy** across setups is only meaningful after acknowledging baseline strength; comparing **delta from baseline** (gated − baseline) is more comparable.
 
-#### 6.4.2 Delta from baseline (gated − baseline)
+#### 4.4.2 Delta from baseline (gated − baseline)
 
-| Dataset | Codebase (L4): Δ (pp) | Hiva (A100): Δ (pp) | Comment |
+| Dataset | Repo1 (L4): Δ (pp) | Repo2 (A100): Δ (pp) | Comment |
 |---------|------------------------|----------------------|---------|
 | SNLI    | **+15.02** (74→89.02)  | **−0.27** (90.48→90.21) | We gain a lot from the gate over a weak baseline; Hiva keeps a strong baseline almost unchanged. Same mechanism, different starting point. |
 | SST-2   | **+24.66** (67.89→92.55) | **−0.62** (97.29→96.67) | Same pattern: we gain 24.66 pp; Hiva loses 0.62 pp. |
@@ -165,9 +140,9 @@ Our BERT runs are on **L4** (1 epoch, batch 24, gate warmup 1000, target 0.3 or 
 
 **Takeaway:** On **SNLI and SST-2**, our **positive Δ** shows the gate helps when the baseline is underconverged; Hiva's **small negative Δ** shows the gate preserves a strong baseline. So the **gate is not hurting** in either case; the apparent "difference" is baseline strength. **MRPC** is the only task where Hiva's gated model drops a lot (−17.32 pp) despite low actual deletion (5.7%)—suggesting **dataset size and paraphrase sensitivity** interact badly with her gate/controller in that run. **IMDB** on our side is unstable (one run collapses); Hiva's longer sequences and epochs keep accuracy. **TyDi:** Our +7.98 pp is without blending; her 0.35 EM with blending shows **blending is the main lever** for closing the QA gap.
 
-#### 6.4.3 Actual deletion rate vs accuracy
+#### 4.4.3 Actual deletion rate vs accuracy
 
-| Dataset | Codebase actual del% | Codebase gated acc | Hiva actual del% | Hiva gated acc | Observation |
+| Dataset | Repo1 actual del% | Repo1 gated acc | Repo2 actual del% | Repo2 gated acc | Observation |
 |---------|----------------------|--------------------|------------------|----------------|-------------|
 | SNLI    | 76.1%                | 89.02%             | 30.8%            | 90.21%         | We delete **much more** (76% vs 31%) but still reach 89%; Hiva deletes less and keeps 90%. So **higher deletion can still retain high accuracy** on SNLI (redundancy). |
 | SST-2   | 61.8%                | 92.55%             | 47.4%            | 96.67%         | Same pattern: we delete more, accuracy slightly lower in absolute terms but both are high. |
@@ -176,11 +151,11 @@ Our BERT runs are on **L4** (1 epoch, batch 24, gate warmup 1000, target 0.3 or 
 
 **Takeaway:** **SNLI / SST-2** tolerate **high actual deletion** (47–76%) with small accuracy cost—consistent with **task redundancy**. **MRPC (Hiva):** Low deletion (5.7%) but large accuracy drop → points to **optimization or regularization** (e.g. gate init, weight decay, small dataset) rather than deletion magnitude. **TyDi:** Blending + moderate deletion (25%) yields better EM than no blending with low deletion (11%) → **mechanism (blending) matters more than deletion rate alone** for QA.
 
-#### 6.4.4 XLM-R (both A100): direct comparison with Δ
+#### 4.4.4 XLM-R (both A100): direct comparison with Δ
 
 Same GPU (A100), so differences are **purely from setup** (epochs, data, seed, gate/controller settings).
 
-| Dataset | Our baseline | Our MrXLM 0.3 | Our Δ (pp) | Hiva baseline | Hiva MrXLMR-30% | Hiva Δ (pp) |
+| Dataset | Repo1 baseline | Repo1 MrXLM 0.3 | Repo1 Δ (pp) | Repo2 baseline | Repo2 MrXLMR-30% | Repo2 Δ (pp) |
 |---------|--------------|---------------|------------|---------------|-----------------|-------------|
 | MRPC    | 68.38%       | 72.06%        | **+3.68**   | —             | —               | —           |
 | SST-2   | 79.01%       | 61.01%        | **−18.00**  | —             | —               | —           |
@@ -190,7 +165,7 @@ Same GPU (A100), so differences are **purely from setup** (epochs, data, seed, g
 
 **Findings:** (1) Our XLM-R baseline on SNLI is **33.82%** vs Hiva's **89.85%**—a **56 pp** gap (underconverged or different splits). (2) With a healthy baseline (Hiva SNLI), adding the gate costs **−7.58 pp**—clear **XLM-R fragility**. (3) On our runs: gate helps on MRPC (+3.68 pp), hurts on SST-2/IMDB/XNLI (−18 to −30 pp). (4) **XLM-R + gate** is task-dependent and more fragile than BERT; only MRPC (our run) shows a clear gain.
 
-#### 6.4.5 TyDi QA: no blending vs blending
+#### 4.4.5 TyDi QA: no blending vs blending
 
 | Config              | Baseline EM | Gated EM | Actual del% | Note                          |
 |---------------------|-------------|----------|-------------|--------------------------------|
@@ -203,15 +178,7 @@ Same GPU (A100), so differences are **purely from setup** (epochs, data, seed, g
 
 ---
 
-## 7. Alina vs Hiva — results & method (integrated)
-
-### 7.1 Does GPU affect accuracy?
-
-**No.** Different GPUs affect **inference time (latency/throughput) only**, not accuracy.
-
-- Accuracy is determined by **model (weights), data, and evaluation protocol**. Same checkpoint + same inputs → same outputs (up to dtype).
-- GPU (L4 vs T4 vs A100) changes **inference latency** and **training wall time**, not validation/test accuracy.
-- So when comparing **accuracy** between our codebase and Hiva’s report, the differences are from **setup** (epochs, blending, gate init, lr, batch, max length, etc.), **not** from L4 vs A100.
+## 7. Repo 1 and Repo2 comparation
 
 ### 7.2 Method / setup differences (why numbers differ)
 
