@@ -1,6 +1,6 @@
 GitHub:
 - **repo1: Alina Huang (this repo)** `https://github.com/TinaLand/standford_cs224n_project`
-- **repo2: repo2**: `https://github.com/repo2Mohammadzadeh1/CS224N-project`
+- **repo2: Hiva Zaad**: `https://github.com/repo2Mohammadzadeh1/CS224N-project`
 
 ---
 ## Summary
@@ -100,7 +100,7 @@ Our BERT runs are on **L4** (1 epoch, batch 24, gate warmup 1000, target 0.3 or 
 
 | Source | GPU | Baseline | MrBERT-30% | Speedup |
 |--------|-----|----------|------------|---------|
-| **Repo1** | **T4** (batch 16, seq 256) | ~95 ms/batch | ~43 ms/batch | **~30–55%** |
+| **Repo1** | **L4** (batch 16, seq 256) | ~95 ms/batch | ~43 ms/batch | **~30–55%** |
 | **Repo2 (report)** | **A100** | 1.440 ms/sample | 0.763 ms/sample | **1.89×** |
 
 **Conclusion (6.3):**
@@ -111,7 +111,7 @@ Our BERT runs are on **L4** (1 epoch, batch 24, gate warmup 1000, target 0.3 or 
 
 ### 4.4 Detailed analysis tables
 
-#### 4.4.2 Delta from baseline (gated − baseline)
+#### 4.4.1 Delta from baseline (gated − baseline)
 
 | Dataset | Repo1 (L4): Δ (pp) | Repo2 (A100): Δ (pp) | Comment |
 |---------|------------------------|----------------------|---------|
@@ -128,7 +128,7 @@ Our BERT runs are on **L4** (1 epoch, batch 24, gate warmup 1000, target 0.3 or 
 - **IMDB: instability vs stability.** IMDB on our side is unstable (one run collapses), while repo2's longer sequences and more epochs keep accuracy high—pointing again to **training schedule and input length**, not GPU.
 - **TyDi: blending is the key lever.** Our +7.98 pp gain is without blending; repo2's 0.35 EM with blending shows that **pre-deletion blending (plus L9 gate)** is the main lever for closing the QA gap, beyond just deletion rate.
 
-#### 4.4.3 Actual deletion rate vs accuracy
+#### 4.4.2 Actual deletion rate vs accuracy
 
 | Dataset | Repo1 actual del% | Repo1 gated acc | Repo2 actual del% | Repo2 gated acc | Observation |
 |---------|----------------------|--------------------|------------------|----------------|-------------|
@@ -143,7 +143,7 @@ Our BERT runs are on **L4** (1 epoch, batch 24, gate warmup 1000, target 0.3 or 
 - **MRPC (repo2) shows optimization issues, not just deletion.** MRPC on repo2 has **low deletion (5.7%)** but a **large accuracy drop**, pointing toward **optimization / regularization** effects (e.g., gate init, weight decay, small dataset) rather than deletion magnitude alone.
 - **TyDi: mechanism > deletion rate.** On TyDi, **blending + moderate deletion (~25%)** yields better EM than **no blending with low deletion (~11%)**, showing that the **mechanism (pre-deletion blending) matters more than raw deletion rate** for QA performance.
 
-#### 4.4.4 XLM-R (both A100): direct comparison with Δ
+#### 4.4.3 XLM-R (both A100): direct comparison with Δ
 
 Same GPU (A100), so differences are **purely from setup** (epochs, data, seed, gate/controller settings).
 
@@ -162,7 +162,7 @@ Same GPU (A100), so differences are **purely from setup** (epochs, data, seed, g
 - **Mixed results across tasks.** In our runs, the gate **helps on MRPC** (+3.68 pp) but **hurts on SST-2/IMDB/XNLI** (−18 to −30 pp).
 - **Overall: XLM-R + gate is fragile.** Compared to BERT, **XLM-R + gate** is more task-dependent and fragile; only MRPC (our run) shows a robust gain.
 
-#### 4.4.5 TyDi QA: no blending vs blending
+#### 4.4.4 TyDi QA: no blending vs blending
 
 | Config              | Baseline EM | Gated EM | Actual del% | Note                          |
 |---------------------|-------------|----------|-------------|--------------------------------|
