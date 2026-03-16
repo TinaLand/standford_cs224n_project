@@ -3,7 +3,6 @@ GitHub:
 - **repo2: repo2**: `https://github.com/repo2Mohammadzadeh1/CS224N-project`
 
 ---
-
 ## Summary
 
 The **conclusions** are given **immediately after each table** in Section 6 (Conclusion 6.1, 6.2, 6.3), and **detailed tables** are in Section 6.4. Summary of what the data support:
@@ -195,26 +194,7 @@ Same GPU (A100), so differences are **purely from setup** (epochs, data, seed, g
 
 ---
 
-## 7. Repo 1 and Repo2 comparation
-
-### 7.2 Method / setup differences (why numbers differ)
-
-| Aspect | Codebase (Alina) | repo2 (report) |
-|--------|-------------------|---------------|
-| **Hardware (training)** | BERT: **L4**; XLM-R: **A100** (Modal) | **A100** via Modal |
-| **Hardware (latency)** | **T4** (batch 16, seq 256) | **A100** (e.g. 1.44 ms baseline, 0.76 ms MrBERT-30%) |
-| **Pre-deletion blending** | **No** | **Yes** (Eq.3); TyDi QA, SQuAD |
-| **Gate init** | bias=0, default Linear | W~N(0,0.02), **b=10** |
-| **Gate lr** | Same as backbone | **10⁻⁴** (separate) |
-| **Weight decay** | Not set | **0.01** |
-| **PI kp** | Default **0.5** | **0.01** |
-| **Batch (classification)** | **16 or 24** | **32** |
-| **Max length** | **128** (TyDi/XNLI 256 in some runs) | SNLI 128; SQuAD/TyDi **384**; IMDB **512** |
-| **Regulariser delay** | `--gate_warmup_steps` (e.g. 1000); default 0 | 1000 steps (100 for TyDi) |
-| **Epochs** | 1–3 | 3 (5 for MRPC) |
-| **Hard-train** | No | Yes (e.g. MrBERT-30% hard-train) |
-
-### 7.3 Summary: what differs and why
+### 4.5 Summary: what differs and why
 
 | Metric / aspect | Codebase (Alina) | repo2 (report) | Main reason for gap |
 |-----------------|------------------|---------------|----------------------|
@@ -226,10 +206,3 @@ Same GPU (A100), so differences are **purely from setup** (epochs, data, seed, g
 | **XLM-R SNLI (A100)** | 33.82% bl / 33.82% MrXLM | 89.85% bl / 82.27% MrXLM | Different baselines (setup); both show fragility |
 | **Latency** | T4, 30–55% speedup | A100, 1.89× | **GPU** + same idea |
 
-### 7.4 Short answers
-
-1. **Compare codebase vs repo2 data and results**  
-   - **BERT:** Our L4 runs (1 ep, warmup, no blending) give strong **relative** gains (e.g. SNLI 74%→89%, SST-2 67%→92.55%, TyDi 20%→28% EM). repo2’s A100 runs use stronger baselines and report small drops (e.g. SNLI 90.48%→90.21%, SST-2 97.29%→96.67%). Absolute numbers differ mainly because of **baselines and setup**, not GPU.  
-   - **TyDi QA:** The **0.35 vs ~0.28 EM** gap is from **pre-deletion blending** (and layer-9 gate) in repo2’s setup.  
-   - **XLM-R (both A100):** Direct comparison in Section 6.2; baseline levels differ a lot (e.g. SNLI 33% vs 90%) → different training; both show XLM-R fragility with the gate.  
-   - **Latency:** We report T4 (30–55% speedup); repo2 reports A100 (1.89×). **GPU** explains the different absolute and relative speedups.
