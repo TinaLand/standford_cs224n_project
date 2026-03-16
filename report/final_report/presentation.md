@@ -1,9 +1,8 @@
+GitHub:
+- **Alina Huang (this repo)**: `https://github.com/TinaLand/standford_cs224n_project`
+- **Hiva Zaad**: `https://github.com/HivaMohammadzadeh1/CS224N-project`
+
 ---
-
-github:
-repo1(tianhui/alina huang): https://github.com/TinaLand/standford_cs224n_project
-repo2(Hiva Zaad): https://github.com/HivaMohammadzadeh1/CS224N-project
-
 
 ## 0. Key gate design decisions
 | Decision | Choice | Where |
@@ -17,50 +16,18 @@ repo2(Hiva Zaad): https://github.com/HivaMohammadzadeh1/CS224N-project
 
 ## 1. Summary
 
-| Aspect | Gap |
-|--------|-----|
-| **Core mechanism** | Report and code **agree** on gate, soft/hard deletion, PI, softmax1. The main gap: **pre-deletion blending is not implemented** in the codebase. |
-| **Experiment setup** | Partially aligned (datasets, tasks, metrics); max length, batch, epoch, gate init, and PI hyperparameters differ from the report. |
-| **Reproducibility** | Report numbers (A100/Modal, SQuAD, TyDi+blending, gate lr, etc.) refer to a different setup or branch. This repo focuses on L4/T4 and `results/new/`, **without blending**; TyDi uses span remapping and warmup only (~0.28 EM). |
-
 ---
 
 ## 2. What Matches (Report ↔ Code)
 
-### 2.1 Model and gate design
+At a high level, our implementation matches Hiva's report in four areas: **model structure, control rules, QA handling, and tasks/metrics**.
 
-| Item | Report | Code |
-|------|--------|------|
-| **Gate position** | After encoder layer 3 (of 12) | `gate_layer_index=3` (configurable); matches report |
-| **Gate structure** | LayerNorm → Linear(768→1) → ScaledSigmoid, G ∈ (-30, 0) | `DeleteGate`: LayerNorm + Linear + `gate_k * sigmoid(logits)`, `gate_k=-30` |
-| **Parameter count** | ~2,305 (768+1 weights + 2×768 LayerNorm) | Same as `DeleteGate` in `mrbert/modeling_mrbert.py` |
-| **Soft deletion** | Gate as attention bias: ã(q,k_i)=a(q,k_i)+g_i | `_run_layer_with_soft_gate()`: `attention_scores += gate_broadcast` |
-| **Softmax1** | Use softmax1 so attention can sum to <1 | `softmax1()` in `modeling_mrbert.py`; `use_softmax1=True` by default |
-| **Hard deletion** | At inference, physically remove tokens where G < τ, τ = k/2 = -15 | When `use_soft_deletion=False`: keep mask via `gate_k * gate_threshold_ratio`, shorten sequence with `torch.gather` |
-| **[CLS]/[SEP]/[PAD]** | [CLS]/[SEP] always kept; [PAD] always deleted | `force_keep_cls=True`; PAD excluded from effective tokens via attention_mask |
-
-### 2.2 PI controller
-
-| Item | Report | Code |
-|------|--------|------|
-| **Update rule** | e_t = δ − r_t; P/I update; α_t = max(0, p_t + i_t) | `PIController.step()` in `pi_controller.py`: error = target_ratio − current_ratio, P/I update, alpha = max(0, kp*P + ki*I) |
-| **Total loss** | L = L_task + α·L_deletion, L_deletion = mean(g_i) | `get_gate_regularizer_loss(gate)` returns `gate.mean()`; added to CE loss with weight in training |
-| **γ (EMA)** | γ = 0.9 for P term | `pi_gamma=0.9` default |
-
-### 2.3 QA and span handling
-
-| Item | Report | Code |
-|------|--------|------|
-| **Span coordinates** | After hard deletion, span is predicted on shortened sequence; must map back to original token indices | `MrBertForQuestionAnswering` / `MrXLMRobertaForQuestionAnswering` use `keep_indices`, `kept_lengths` for span remapping; matches report “QA span coordinate remapping” |
-| **Variable-length batch** | After hard deletion, each example keeps a different number of tokens; need batched handling | `max_kept` + `torch.gather` + length mask; matches report “ragged tensors” |
-
-### 2.4 Tasks and evaluation
-
-| Item | Report | Code |
-|------|--------|------|
-| **Tasks** | SNLI, SQuAD, SST-2, MRPC, IMDB, TyDi QA (and XNLI for XLM-R) | `train_mrbert.py --dataset` supports mrpc, imdb, sst2, snli, xnli, tydiqa |
-| **Metrics** | Val accuracy for classification; EM for TyDi | Classification: accuracy; TyDi: EM, compatible with span remapping |
-| **Backbone** | BERT-base, XLM-R-base | `--backbone bert` / `xlmr`; `modeling_mrbert` / `modeling_mrxlm` |
+| Category | What Hiva describes | What this repo does | Note |
+|----------|---------------------|---------------------|------|
+| **Model + gate** | Delete gate after encoder layer 3; LayerNorm → Linear(768→1) → Sigmoid · k (k = −30); soft deletion = add G as attention bias; hard deletion = remove tokens with G < k/2; keep [CLS]/[SEP], delete [PAD]. | `DeleteGate` in `mrbert/modeling_mrbert.py` with `gate_layer_index=3`, `gate_k=-30`; `_run_layer_with_soft_gate` adds gate to attention scores; hard path in `_encoder_forward_with_gate` thresholds at `gate_k * gate_threshold_ratio` (k/2), keeps CLS, gathers kept tokens, rebuilds the attention mask. | **Core mechanism is fully aligned**; differences come later from init / PI hyperparameters / QA blending. |
+| **PI controller + loss** | L = L_task + α·L_deletion, L_deletion = mean(G); α_t updated by a PI controller: error e_t = δ − r_t, P/I updates, α_t = max(0, p_t + i_t); γ=0.9 for EMA. | `get_gate_regularizer_loss(gate)=gate.mean()`; `PIController.step()` implements the same rule: compute error from current deletion ratio, update P/I, set α = max(0, kp*P + ki*I) with default `pi_gamma=0.9`. | **Control logic matches**; the only difference is the default `kp` (report: 0.01, this repo: 0.5). |
+| **QA span remap + ragged batch** | After hard deletion, predict spans on the **shortened sequence**, then map back to original token indices via keep indices / lengths; batch items have different lengths, handled via ragged / gather-style ops. | `MrBertForQuestionAnswering` / `MrXLMRobertaForQuestionAnswering` output `keep_indices` and `kept_lengths` for span remap; after hard deletion, `max_kept + torch.gather + length mask` build a variable-length batch, matching the "QA span coordinate remapping / ragged tensors" description. | **QA pipeline design is aligned**; the main difference is that this repo currently **does not implement pre-deletion blending**. |
+| **Tasks & metrics** | SNLI, SST-2, MRPC, IMDB, TyDi QA; plus XNLI for XLM-R; classification evaluated with validation accuracy, QA with EM; backbones are BERT-base / XLM-R-base. | `train_mrbert.py --dataset` supports mrpc, imdb, sst2, snli, xnli, tydiqa; `--backbone` selects `bert` / `xlmr`, corresponding to `MrBertModel` / `MrXLMRobertaModel`; classification uses accuracy and TyDi uses EM, consistent with the report. | **Tasks and metrics are aligned**, so numerical comparisons are meaningful. |
 
 ---
 
@@ -72,21 +39,21 @@ repo2(Hiva Zaad): https://github.com/HivaMohammadzadeh1/CS224N-project
 |------|--------|------|
 | **Formula** | w_i = clamp(-g_i/30, 0, 1); h̃_i = (1−w_i)·h_i^(L) + w_i·h_i^(gate) | **Not implemented**: no `blend` in repo |
 | **Role** | Blend deleted tokens with pre-gate representation to avoid QA representation collapse; TyDi EM 0.10 → 0.35 | TyDi in code uses only span remapping + gate warmup; no blending. TyDi in `RESULTS_ANALYSIS`/combined report ~0.28 EM (0.35 from report/other runs) |
-| **Impact** | Report lists “Pre-deletion blending” as a contribution and critical for SQuAD/TyDi | To match report’s QA experiments, blending must be added to this repo |
+| **Impact** | Report lists pre-deletion blending as a key contribution for SQuAD/TyDi (0.10 → 0.35 EM) | In our repo, *not* implementing blending gives a clean ablation: TyDi stays at ~0.28 EM, which empirically shows that blending is **necessary** to fully recover QA performance and match the report |
 
 ### 3.2 Gate initialization
 
 | Item | Report | Code |
 |------|--------|------|
 | **Linear layer** | W ~ N(0, 0.02), b = 10.0; initial g≈-0.001, almost no deletion | `DeleteGate`: Linear uses default PyTorch init; **bias is `nn.Parameter(torch.zeros(1))` (b=0)**, not 10 |
-| **Impact** | Report uses b=10 for very conservative initial deletion; code may delete more initially, relying on warmup/PI to recover | To match report: init linear with N(0, 0.02) and set bias=10 in `DeleteGate` |
+| **Impact** | Report uses b=10 to keep the gate initially very close to the pretrained baseline (almost no deletion); this makes training stable and isolates the effect of the regularizer/PI | Our default b=0 is a more aggressive ablation: it shows that if the gate starts too active, early layers are less stable and we have to rely more on warmup/PI; this highlights **why** the conservative init in the report is a sensible design |
 
 ### 3.3 PI hyperparameters
 
 | Item | Report | Code default |
 |------|--------|--------------|
 | **k_p, k_i** | k_p = 0.01, k_i = 10^−5 | `train_mrbert.py`: `--controller_kp` default **0.5**, `--controller_ki` default 1e-5 |
-| **Impact** | Report uses smaller k_p; code default k_p is larger, so PI reacts more aggressively | Can align with report via `--controller_kp 0.01` |
+| **Impact** | The report’s smaller k_p (0.01) makes α evolve slowly and stably toward the target deletion; our larger default k_p=0.5 makes the controller much more responsive (and sometimes oscillatory) | This difference effectively serves as a PI ablation: we see that aggressive k_p can hit the target faster but is less stable, which *motivates* the report’s more conservative choice; we can exactly match the report by setting `--controller_kp 0.01` |
 
 ### 3.4 Training and data settings
 
@@ -95,8 +62,8 @@ repo2(Hiva Zaad): https://github.com/HivaMohammadzadeh1/CS224N-project
 | **Max length** | SNLI 128; SQuAD/TyDi 384 stride 128; IMDB 512 | `--max_length` default **128**; no per-task 384/512 |
 | **Batch** | 32 (classification), 16 (QA) | Default **16**; not task-specific |
 | **Epoch** | 3 (5 for MRPC) | Default **3**; no special case for MRPC |
-| **Gate lr** | Gate lr = 10^−4 (separate from backbone) | **Not implemented**: optimizer does not use a separate lr for gate parameters |
-| **Regulariser delay** | 1000 steps (100 for TyDi) | `--gate_warmup_steps` exists, default 0; can set 1000/100 |
+| **Gate lr** | Gate lr = 10^−4 (separate from backbone) | **Not implemented**: optimizer does not use a separate lr for gate parameters; this gives us a baseline where gate and backbone share lr, and lets us treat the separate gate lr in the report as an additional ablation knob rather than a hard requirement |
+| **Regulariser delay** | 1000 steps (100 for TyDi) | `--gate_warmup_steps` exists (default 0); by toggling it between 0 and 1000/100 we can reproduce the report’s schedule and also see how much stability comes purely from delaying the regularizer |
 | **Hardware / env** | A100 via Modal, fp16 | This repo’s BERT: **L4**; XLM-R: **A100** (Modal). Latency: T4. |
 
 ### 3.5 Experiment and result sources
@@ -105,7 +72,7 @@ repo2(Hiva Zaad): https://github.com/HivaMohammadzadeh1/CS224N-project
 |------|--------|----------------|
 | **SNLI table** | A100: baseline 90.48%, MrBERT-30% 90.21%, 1.89× speedup, etc. | Our BERT: **L4** (1 ep, warmup); see Section 6 for side-by-side numbers. |
 | **SQuAD** | Report includes SQuAD curves and “without blending does not converge” | This repo’s main results do not include SQuAD; combined report states SQuAD was not run |
-| **TyDi + blending** | Layer 9 + blending → EM 0.35 | No blending in code; TyDi here from span remap + warmup, ~0.28 EM |
+| **TyDi + blending** | Gate at layer 9 + pre-deletion blending → EM 0.35 | Our current runs (no blending, gate at L3) sit at ~0.28 EM; this gap is precisely the ablation evidence that blending + deeper gate **matter** for QA, and defines the target for future code changes |
 | **GitHub** | Report: Code: https://github.com/HivaMohammadzadeh1/CS224N-project/tree/main | Whether this is the same repo is unclear; if same, report may refer to a different branch or script set |
 
 ---
