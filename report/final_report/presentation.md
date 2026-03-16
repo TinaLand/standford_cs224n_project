@@ -77,17 +77,6 @@ At a high level, our implementation matches Hiva's report in four areas: **model
 
 ---
 
-## 4. Summary table (implementation)
-
-| Category | Aligned | Not aligned / missing |
-|----------|---------|------------------------|
-| **Model** | Gate structure, soft/hard deletion, softmax1, [CLS] kept | Gate bias init b=10 not implemented |
-| **PI** | Formula, L_deletion, γ | Default k_p=0.5 (report 0.01) |
-| **QA** | Span coordinate remap, variable-length batch, EM evaluation | **Pre-deletion blending not implemented** |
-| **Training** | Datasets, tasks, AdamW lr, warmup concept | max_length fixed 128, batch 16, no gate-specific lr, epoch not task-specific |
-| **Experiments** | Task set, metrics, some BERT/XLM-R results | Report numbers from A100/Modal and TyDi with blending; this repo’s BERT from L4, no blending |
-
----
 
 ## 5. Recommendations to Align Report and Code
 
