@@ -36,7 +36,7 @@ At a high level, our implementation matches repo2's report in four areas: **mode
 
 ---
 
-## 3. Mismatches
+## 3. Ablation Experiment
 
 Single overview: Repo2 (repo2/report) vs Repo1 (this codebase).
 
@@ -47,7 +47,7 @@ Single overview: Repo2 (repo2/report) vs Repo1 (this codebase).
 | Control | PI Gain (k_p) | k_p = 0.01 (stable, slow controller) | k_p = 0.5 (aggressive default) | High k_p makes the controller react too sharply, causing deletion-rate oscillations. | Repo 1’s deletion rate fluctuates more before reaching steady state compared to Repo 2’s smoother traces. |
 | Opt | Gate Learning Rate | Separate gate lr = 10^−4 | Shared with backbone | A shared high LR can make the small gate parameter “over-shoot” and fail to converge cleanly. | Observed task-sensitive deletion rates (e.g., MRPC / IMDB) in Repo 1, consistent with more fragile gate optimization. |
 | Data | Max Sequence Length | Task-specific (128–512, e.g., IMDB 512) | Mostly fixed 128 (some runs 256) | Fixed short length loses context on long-document tasks like IMDB. | IMDB baseline gap: Repo 2 ≈ **94%** vs Repo 1 ≈ **88%**. |
-| Schedule | Regularizer Warmup | 1000 steps (100 for TyDi) | 0 steps by default (immediate regularizer) | Immediate deletion pressure prevents the gate from first learning token importance properly. | Contributes to under-convergence in Repo 1 when combined with 1-epoch training. |
+| Schedule | Regularizer Warmup | 1000 steps (100 for TyDi) | 0 steps by default by command support for warm up parameter(immediate regularizer) | Immediate deletion pressure prevents the gate from first learning token importance properly. | Contributes to under-convergence in Repo 1 when combined with 1-epoch training. |
 | Hardware | Compute Platform | A100 (high-end) | L4 / T4 (mid-range) | GPU affects **throughput and latency**, not accuracy, for the same model and data. | Latency: Repo 2 reports **1.89×** speedup (A100); Repo 1 sees ~**30–55%** speedup on T4 for MrBERT-30%. |
 
 ---
@@ -70,7 +70,7 @@ Our BERT runs are on **L4** (1 epoch, batch 24, gate warmup 1000, target 0.3 or 
 | **TyDi QA (EM)** | 20.18% (0.3) | **28.16%** | 10.9% | 0.40 (no blend) | **0.35** (blend L9) | ~24.7% |
 | **XNLI** | 74.82% (0.3) | **80.56%** | 65.4% | — | — | — |
 
-**Conclusion (6.1):**
+**Conclusion (4.1):**
 
 - **Baseline gap (absolute accuracy).** Baseline gaps (our L4 1 ep vs repo2 A100 3–5 ep) are **+16 to +29 pp** on SNLI/SST-2/MRPC—driven by **epochs / training schedule**, not GPU type.
 - **Delta from baseline (relative gain).** We get **+15 to +25 pp** on SNLI/SST-2 (gate corrects a weak baseline); repo2 gets **−0.27 to −0.62 pp** (gate preserves a strong baseline). **Same mechanism**, but in our setting it behaves like a *corrector*, in repo2 like a *preserver*.
@@ -111,20 +111,6 @@ Our BERT runs are on **L4** (1 epoch, batch 24, gate warmup 1000, target 0.3 or 
 
 ### 4.4 Detailed analysis tables
 
-#### 4.4.1 Baseline gap (codebase L4 vs repo2 A100)
-
-| Dataset | Repo1 baseline (L4, 1 ep) | Repo2 baseline (A100) | Gap (pp) | Interpretation |
-|---------|------------------------------|------------------------|----------|----------------|
-| SNLI    | 74.00%                       | 90.48%                 | **+16.48** | 1 epoch vs 3 epochs (and possibly different data order/seed). Most of the SNLI gap is from **training length**, not GPU. |
-| SST-2   | 67.89%                       | 97.29%                 | **+29.40** | Very large: our 1-ep baseline is far from converged; repo2's is near ceiling. |
-| MRPC    | 68.38%                       | 86.03%                 | **+17.65** | repo2 uses 5 epochs for MRPC; we use 1–3. Small dataset (3.7K) benefits from more epochs. |
-| IMDB    | 87.85%                       | 93.97%                 | **+6.12**  | Both reasonable; we use 1 ep, repo2 3. Long-doc task needs more steps. |
-
-**Takeaway:**
-
-- **Baseline gaps come from training, not GPU.** The **16–29 pp** baseline gaps on SNLI/SST-2/MRPC are overwhelmingly due to **epoch count and training schedule** (1 ep vs 3–5 ep), not L4 vs A100.
-- **Compare deltas, not raw numbers.** Comparing **gated accuracy** across setups is only meaningful after acknowledging baseline strength; comparing **delta from baseline** (gated − baseline) is a more reliable way to compare methods.
-
 #### 4.4.2 Delta from baseline (gated − baseline)
 
 | Dataset | Repo1 (L4): Δ (pp) | Repo2 (A100): Δ (pp) | Comment |
@@ -132,7 +118,7 @@ Our BERT runs are on **L4** (1 epoch, batch 24, gate warmup 1000, target 0.3 or 
 | SNLI    | **+15.02** (74→89.02)  | **−0.27** (90.48→90.21) | We gain a lot from the gate over a weak baseline; repo2 keeps a strong baseline almost unchanged. Same mechanism, different starting point. |
 | SST-2   | **+24.66** (67.89→92.55) | **−0.62** (97.29→96.67) | Same pattern: we gain 24.66 pp; repo2 loses 0.62 pp. |
 | MRPC    | +0.25 (68.38→68.63)   | **−17.32** (86.03→68.71) | We are flat; repo2 has a large drop. MRPC is sensitive: with a strong baseline and same nominal "30% target," her setup deletes only 5.7% but accuracy collapses—likely **task + small data + gate dynamics**. |
-| IMDB    | **−30.43** (87.85→57.42) | −0.94 (93.97→93.03) | We **collapse** (gate barely activates, 4.7% del; run unstable). repo2 stays near baseline. Our IMDB is an outlier; her setup (longer seq, more ep) is more stable. |
+| IMDB    | **−30.43** (87.85→57.42) | −0.94 (93.97→93.03) | We **collapse** (gate barely activates, 4.7% del; run unstable). repo2 stays near baseline. Our IMDB is an outlier; repo2's longer max sequence length and more epochs make their run much more stable. |
 | TyDi QA  | **+7.98** (20.18→28.16% EM) | −0.05 (0.40→0.35 with blend L9) | We gain ~8 pp EM without blending; repo2 stays near BERT with blending. Our 0.28 EM is below her 0.35—**blending** recovers the gap. |
 
 **Takeaway:**
@@ -196,7 +182,7 @@ Same GPU (A100), so differences are **purely from setup** (epochs, data, seed, g
 
 ### 4.5 Summary: what differs and why
 
-| Metric / aspect | Codebase (Alina) | repo2 (report) | Main reason for gap |
+| Metric / aspect | repo1 | repo2 | Main reason for gap |
 |-----------------|------------------|---------------|----------------------|
 | **SNLI baseline** | 74% (1 ep, L4) | 90.48% (A100) | Epochs / training setup |
 | **SNLI MrBERT** | 89.02% | 90.21% | Baseline + setup |
