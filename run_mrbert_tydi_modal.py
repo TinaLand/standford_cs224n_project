@@ -1,9 +1,13 @@
 #!/usr/bin/env python3
 """
-Run MrBERT TyDi QA on Modal A100.
+Run MrBERT TyDi QA on Modal A100 with configurable arguments.
 
-Usage:
-  modal run run_mrbert_tydi_modal.py
+Examples:
+  # with blending
+  modal run --detach run_mrbert_tydi_modal.py --use-pre-deletion-blend --wandb-run-name tydiqa-with-blend-l3-30pct
+
+  # without blending
+  modal run --detach run_mrbert_tydi_modal.py --no-use-pre-deletion-blend --wandb-run-name tydiqa-no-blend-l3-30pct
 """
 import os
 import subprocess
@@ -37,48 +41,70 @@ volume = modal.Volume.from_name("mrbert-tydi-results", create_if_missing=True)
     volumes={"/vol/results": volume},
     secrets=[modal.Secret.from_name("wandb-api-key")],
 )
-def run_training() -> str:
+def run_training(
+    dataset: str = "tydiqa",
+    backbone: str = "bert",
+    epochs: int = 3,
+    batch_size: int = 16,
+    max_length: int = 256,
+    lr: float = 2e-5,
+    target_deletion: float = 0.3,
+    gate_layer_index: int = 3,
+    gate_threshold_ratio: float = 0.5,
+    gate_warmup_steps: int = 1000,
+    use_pi: bool = True,
+    controller_kp: float = 0.5,
+    controller_ki: float = 1e-5,
+    use_pre_deletion_blend: bool = True,
+    use_wandb: bool = True,
+    wandb_project: str = "mrbert-tydiqa",
+    wandb_run_name: str = "tydiqa-with-blend-l3-30pct",
+) -> str:
     env = os.environ.copy()
     env["PYTHONPATH"] = "/workspace"
-    # Force online logging for every run.
-    env["WANDB_MODE"] = "online"
+    if use_wandb:
+        env["WANDB_MODE"] = "online"
+    else:
+        env["WANDB_MODE"] = "disabled"
 
     os.chdir("/workspace")
     cmd = [
         "python",
         "train_mrbert.py",
         "--dataset",
-        "tydiqa",
+        dataset,
         "--backbone",
-        "bert",
+        backbone,
         "--epochs",
-        "3",
+        str(epochs),
         "--batch_size",
-        "16",
+        str(batch_size),
         "--max_length",
-        "256",
+        str(max_length),
         "--lr",
-        "2e-5",
+        str(lr),
         "--target_deletion",
-        "0.3",
+        str(target_deletion),
         "--gate_layer_index",
-        "3",
+        str(gate_layer_index),
         "--gate_threshold_ratio",
-        "0.5",
+        str(gate_threshold_ratio),
         "--gate_warmup_steps",
-        "1000",
-        "--use_pi",
+        str(gate_warmup_steps),
         "--controller_kp",
-        "0.5",
+        str(controller_kp),
         "--controller_ki",
-        "1e-5",
-        "--use_pre_deletion_blend",
-        "--use_wandb",
-        "--wandb_project",
-        "mrbert-tydiqa",
-        "--wandb_run_name",
-        "tydiqa-with-blend-l3-30pct",
+        str(controller_ki),
     ]
+    if use_pi:
+        cmd.append("--use_pi")
+    if use_pre_deletion_blend:
+        cmd.append("--use_pre_deletion_blend")
+    else:
+        cmd.append("--no-use_pre_deletion_blend")
+    if use_wandb:
+        cmd.extend(["--use_wandb", "--wandb_project", wandb_project, "--wandb_run_name", wandb_run_name])
+
     ret = subprocess.run(cmd, env=env)
     if os.path.isdir("/workspace/results"):
         os.makedirs("/vol/results", exist_ok=True)
@@ -90,7 +116,43 @@ def run_training() -> str:
 
 
 @app.local_entrypoint()
-def main():
+def main(
+    dataset: str = "tydiqa",
+    backbone: str = "bert",
+    epochs: int = 3,
+    batch_size: int = 16,
+    max_length: int = 256,
+    lr: float = 2e-5,
+    target_deletion: float = 0.3,
+    gate_layer_index: int = 3,
+    gate_threshold_ratio: float = 0.5,
+    gate_warmup_steps: int = 1000,
+    use_pi: bool = True,
+    controller_kp: float = 0.5,
+    controller_ki: float = 1e-5,
+    use_pre_deletion_blend: bool = True,
+    use_wandb: bool = True,
+    wandb_project: str = "mrbert-tydiqa",
+    wandb_run_name: str = "tydiqa-with-blend-l3-30pct",
+):
     print("Submitting MrBERT TyDi run on Modal A100...")
-    run_training.remote()
+    run_training.remote(
+        dataset=dataset,
+        backbone=backbone,
+        epochs=epochs,
+        batch_size=batch_size,
+        max_length=max_length,
+        lr=lr,
+        target_deletion=target_deletion,
+        gate_layer_index=gate_layer_index,
+        gate_threshold_ratio=gate_threshold_ratio,
+        gate_warmup_steps=gate_warmup_steps,
+        use_pi=use_pi,
+        controller_kp=controller_kp,
+        controller_ki=controller_ki,
+        use_pre_deletion_blend=use_pre_deletion_blend,
+        use_wandb=use_wandb,
+        wandb_project=wandb_project,
+        wandb_run_name=wandb_run_name,
+    )
     print("Submitted. Check Modal dashboard logs for progress.")

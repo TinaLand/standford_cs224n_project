@@ -207,10 +207,20 @@ class MrBertModel(BertModel):
         pre_deletion_hidden: torch.Tensor | None,
         gate: torch.Tensor | None,
         gate_k: float,
+        keep_indices: torch.Tensor | None = None,
     ) -> torch.Tensor:
         """Blend final hidden with pre-gate hidden using gate-derived weights."""
         if pre_deletion_hidden is None or gate is None:
             return sequence_output
+        # Hard-deletion path: sequence_output may be shortened; align gate/pre_hidden via keep indices.
+        if keep_indices is not None and sequence_output.size(1) != gate.size(1):
+            hidden_size = pre_deletion_hidden.size(-1)
+            pre_deletion_hidden = torch.gather(
+                pre_deletion_hidden,
+                1,
+                keep_indices.unsqueeze(-1).expand(-1, -1, hidden_size),
+            )
+            gate = torch.gather(gate, 1, keep_indices)
         # gate shape: (batch, seq), range [gate_k, 0] with gate_k < 0
         weights = torch.clamp(-gate / abs(gate_k), 0.0, 1.0).unsqueeze(-1)  # (batch, seq, 1)
         return (1.0 - weights) * sequence_output + weights * pre_deletion_hidden
@@ -443,6 +453,7 @@ class MrBertForQuestionAnswering(nn.Module):
                 pre_deletion_hidden=getattr(outputs, "pre_deletion_hidden", None),
                 gate=gate,
                 gate_k=self.mrbert.gate_k,
+                keep_indices=keep_indices,
             )
         logits = self.qa_outputs(sequence_output)  # (batch, seq_len, 2)
         start_logits = logits[:, :, 0]
