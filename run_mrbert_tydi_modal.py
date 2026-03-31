@@ -56,6 +56,8 @@ def run_training(
     controller_kp: float = 0.5,
     controller_ki: float = 1e-5,
     use_pre_deletion_blend: bool = True,
+    use_learnable_pre_deletion_blend: bool = False,
+    pre_deletion_blend_init_scale: float | None = None,
     use_wandb: bool = True,
     wandb_project: str = "mrbert-tydiqa",
     wandb_run_name: str = "tydiqa-with-blend-l3-30pct",
@@ -102,6 +104,12 @@ def run_training(
         cmd.append("--use_pre_deletion_blend")
     else:
         cmd.append("--no-use_pre_deletion_blend")
+    if use_learnable_pre_deletion_blend:
+        cmd.append("--use_learnable_pre_deletion_blend")
+    else:
+        cmd.append("--no-use_learnable_pre_deletion_blend")
+    if pre_deletion_blend_init_scale is not None:
+        cmd.extend(["--pre_deletion_blend_init_scale", str(pre_deletion_blend_init_scale)])
     if use_wandb:
         cmd.extend(["--use_wandb", "--wandb_project", wandb_project, "--wandb_run_name", wandb_run_name])
 
@@ -131,6 +139,8 @@ def main(
     controller_kp: float = 0.5,
     controller_ki: float = 1e-5,
     use_pre_deletion_blend: bool = True,
+    use_learnable_pre_deletion_blend: bool = False,
+    pre_deletion_blend_init_scale: float | None = None,
     use_wandb: bool = True,
     wandb_project: str = "mrbert-tydiqa",
     wandb_run_name: str = "tydiqa-with-blend-l3-30pct",
@@ -151,6 +161,8 @@ def main(
         controller_kp=controller_kp,
         controller_ki=controller_ki,
         use_pre_deletion_blend=use_pre_deletion_blend,
+        use_learnable_pre_deletion_blend=use_learnable_pre_deletion_blend,
+        pre_deletion_blend_init_scale=pre_deletion_blend_init_scale,
         use_wandb=use_wandb,
         wandb_project=wandb_project,
         wandb_run_name=wandb_run_name,

@@ -99,6 +99,17 @@ class MrBertModel(BertModel):
         self.gate_k = config.gate_k
         self.gate_threshold_ratio = config.gate_threshold_ratio
         self.use_softmax1 = getattr(config, "use_softmax1", True)
+        self.use_learnable_pre_deletion_blend = getattr(config, "use_learnable_pre_deletion_blend", False)
+        init_scale = getattr(config, "pre_deletion_blend_init_scale", None)
+        if init_scale is None:
+            init_scale = abs(self.gate_k)
+        # log-parameterization keeps denominator positive during optimization.
+        if self.use_learnable_pre_deletion_blend:
+            self.pre_deletion_blend_log_scale = nn.Parameter(
+                torch.log(torch.tensor(float(init_scale), dtype=torch.float32))
+            )
+        else:
+            self.pre_deletion_blend_log_scale = None
 
     @classmethod
     def from_pretrained_bert(cls, bert_name_or_path: str, **mrbert_config_kwargs):
@@ -201,8 +212,8 @@ class MrBertModel(BertModel):
             return hidden_states, gate, keep_indices_out, kept_lengths_out, pre_deletion_hidden
         return hidden_states, None, None, None, pre_deletion_hidden
 
-    @staticmethod
     def _blend_pre_deletion(
+        self,
         sequence_output: torch.Tensor,
         pre_deletion_hidden: torch.Tensor | None,
         gate: torch.Tensor | None,
@@ -221,8 +232,11 @@ class MrBertModel(BertModel):
                 keep_indices.unsqueeze(-1).expand(-1, -1, hidden_size),
             )
             gate = torch.gather(gate, 1, keep_indices)
-        # gate shape: (batch, seq), range [gate_k, 0] with gate_k < 0
-        weights = torch.clamp(-gate / abs(gate_k), 0.0, 1.0).unsqueeze(-1)  # (batch, seq, 1)
+        # gate shape: (batch, seq), range [gate_k, 0] with gate_k < 0.
+        denom = abs(gate_k)
+        if self.pre_deletion_blend_log_scale is not None:
+            denom = torch.exp(self.pre_deletion_blend_log_scale).clamp_min(1e-6)
+        weights = torch.clamp(-gate / denom, 0.0, 1.0).unsqueeze(-1)  # (batch, seq, 1)
         return (1.0 - weights) * sequence_output + weights * pre_deletion_hidden
 
     def forward(
@@ -413,10 +427,14 @@ class MrBertForQuestionAnswering(nn.Module):
         from transformers import BertForQuestionAnswering
 
         use_pre_deletion_blend = mrbert_kwargs.pop("use_pre_deletion_blend", True)
+        use_learnable_pre_deletion_blend = mrbert_kwargs.pop("use_learnable_pre_deletion_blend", False)
+        pre_deletion_blend_init_scale = mrbert_kwargs.pop("pre_deletion_blend_init_scale", None)
         bert_qa = BertForQuestionAnswering.from_pretrained(bert_name_or_path)
         bert_config = bert_qa.config
         config = MrBertConfig(**{**bert_config.to_dict(), **mrbert_kwargs})
         config.use_pre_deletion_blend = use_pre_deletion_blend
+        config.use_learnable_pre_deletion_blend = use_learnable_pre_deletion_blend
+        config.pre_deletion_blend_init_scale = pre_deletion_blend_init_scale
         model = cls(config)
         model.mrbert.load_state_dict(bert_qa.bert.state_dict(), strict=False)
         model.qa_outputs.load_state_dict(bert_qa.qa_outputs.state_dict())

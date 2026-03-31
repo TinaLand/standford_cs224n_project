@@ -54,6 +54,16 @@ class MrXLMRobertaModel(XLMRobertaModel):
         self.use_softmax1: bool = getattr(config, "use_softmax1", True)
         self.force_keep_cls: bool = getattr(config, "force_keep_cls", True)
         self.log_shapes: bool = getattr(config, "log_shapes", False)
+        self.use_learnable_pre_deletion_blend: bool = getattr(config, "use_learnable_pre_deletion_blend", False)
+        init_scale = getattr(config, "pre_deletion_blend_init_scale", None)
+        if init_scale is None:
+            init_scale = abs(self.gate_k)
+        if self.use_learnable_pre_deletion_blend:
+            self.pre_deletion_blend_log_scale = nn.Parameter(
+                torch.log(torch.tensor(float(init_scale), dtype=torch.float32))
+            )
+        else:
+            self.pre_deletion_blend_log_scale = None
 
         # Make sure DeleteGate sees the gate_k we just set.
         if not hasattr(config, "gate_k"):
@@ -208,8 +218,8 @@ class MrXLMRobertaModel(XLMRobertaModel):
             return hidden_states, gate, keep_indices_out, kept_lengths_out, pre_deletion_hidden
         return hidden_states, None, None, None, pre_deletion_hidden
 
-    @staticmethod
     def _blend_pre_deletion(
+        self,
         sequence_output: torch.Tensor,
         pre_deletion_hidden: torch.Tensor | None,
         gate: torch.Tensor | None,
@@ -228,7 +238,10 @@ class MrXLMRobertaModel(XLMRobertaModel):
                 keep_indices.unsqueeze(-1).expand(-1, -1, hidden_size),
             )
             gate = torch.gather(gate, 1, keep_indices)
-        weights = torch.clamp(-gate / abs(gate_k), 0.0, 1.0).unsqueeze(-1)  # (batch, seq, 1)
+        denom = abs(gate_k)
+        if self.pre_deletion_blend_log_scale is not None:
+            denom = torch.exp(self.pre_deletion_blend_log_scale).clamp_min(1e-6)
+        weights = torch.clamp(-gate / denom, 0.0, 1.0).unsqueeze(-1)  # (batch, seq, 1)
         return (1.0 - weights) * sequence_output + weights * pre_deletion_hidden
 
     def forward(
@@ -443,6 +456,8 @@ class MrXLMRobertaForQuestionAnswering(nn.Module):
         gate_k: float = -30.0,
         gate_threshold_ratio: float = 0.5,
         use_pre_deletion_blend: bool = True,
+        use_learnable_pre_deletion_blend: bool = False,
+        pre_deletion_blend_init_scale: float | None = None,
         **kwargs,
     ) -> "MrXLMRobertaForQuestionAnswering":
         """Load XLM-R weights and add MrXLM gate; QA head from XLMRobertaForQuestionAnswering."""
@@ -454,6 +469,8 @@ class MrXLMRobertaForQuestionAnswering(nn.Module):
         config.gate_k = gate_k
         config.gate_threshold_ratio = gate_threshold_ratio
         config.use_pre_deletion_blend = use_pre_deletion_blend
+        config.use_learnable_pre_deletion_blend = use_learnable_pre_deletion_blend
+        config.pre_deletion_blend_init_scale = pre_deletion_blend_init_scale
 
         model = cls(config)
         model.mrxlm.load_state_dict(hf_qa.roberta.state_dict(), strict=False)

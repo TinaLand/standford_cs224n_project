@@ -309,6 +309,18 @@ def main():
         default=True,
         help="Enable pre-deletion blending in QA heads (recommended for TyDi/SQuAD).",
     )
+    parser.add_argument(
+        "--use_learnable_pre_deletion_blend",
+        action=argparse.BooleanOptionalAction,
+        default=False,
+        help="Learn blend denominator s in clamp(-g/s,0,1) instead of using fixed abs(gate_k).",
+    )
+    parser.add_argument(
+        "--pre_deletion_blend_init_scale",
+        type=float,
+        default=None,
+        help="Optional init value for learnable blend denominator s (default abs(gate_k)=30).",
+    )
     parser.add_argument("--controller_kp", type=float, default=0.5, help="PI controller P gain (default 0.5). Lower = slower alpha ramp.")
     parser.add_argument("--controller_ki", type=float, default=1e-5, help="PI controller I gain (default 1e-5).")
     parser.add_argument("--phase1_steps", type=int, default=0,
@@ -416,6 +428,8 @@ def main():
                 gate_k=-30.0,
                 gate_threshold_ratio=gtr,
                 use_pre_deletion_blend=args.use_pre_deletion_blend,
+                use_learnable_pre_deletion_blend=args.use_learnable_pre_deletion_blend,
+                pre_deletion_blend_init_scale=args.pre_deletion_blend_init_scale,
             )
         else:
             model = MrXLMRobertaForSequenceClassification.from_pretrained_xlm(
@@ -432,6 +446,8 @@ def main():
             gate_k=-30.0,
             gate_threshold_ratio=gtr,
             use_pre_deletion_blend=args.use_pre_deletion_blend,
+            use_learnable_pre_deletion_blend=args.use_learnable_pre_deletion_blend,
+            pre_deletion_blend_init_scale=args.pre_deletion_blend_init_scale,
             attn_implementation="eager",
         )
     else:

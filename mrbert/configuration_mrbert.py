@@ -25,6 +25,8 @@ class MrBertConfig(BertConfig):
         gate_k: float = -30.0,
         gate_threshold_ratio: float = 0.5,
         use_pre_deletion_blend: bool = True,
+        use_learnable_pre_deletion_blend: bool = False,
+        pre_deletion_blend_init_scale: float | None = None,
         use_softmax1: bool = True,
         target_deletion_ratio: float = 0.5,
         pi_kp: float = 0.5,
@@ -40,6 +42,10 @@ class MrBertConfig(BertConfig):
         self.gate_threshold_ratio = gate_threshold_ratio
         # QA feature rehydration: blend final hidden with pre-gate hidden for deleted tokens.
         self.use_pre_deletion_blend = use_pre_deletion_blend
+        # If enabled, learn the blend denominator s instead of fixing it to abs(gate_k).
+        # We still keep the same clamp(-g/s, 0, 1) form for stability and backward compatibility.
+        self.use_learnable_pre_deletion_blend = use_learnable_pre_deletion_blend
+        self.pre_deletion_blend_init_scale = pre_deletion_blend_init_scale
         self.use_softmax1 = use_softmax1
         # PI controller (Section 3.2, Eq.4-6): target deletion ratio and P-I gains
         self.target_deletion_ratio = target_deletion_ratio
