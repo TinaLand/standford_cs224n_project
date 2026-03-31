@@ -292,6 +292,12 @@ def main():
                         help="Hard-deletion threshold = gate_k * this (e.g. 0.5 => k/2). Higher = keep more tokens.")
     parser.add_argument("--gate_warmup_steps", type=int, default=0,
                         help="Gate warm-up: first N steps use gate_regularizer_weight=0 (gate computed but no deletion pressure). 0 = disabled.")
+    parser.add_argument(
+        "--use_pre_deletion_blend",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help="Enable pre-deletion blending in QA heads (recommended for TyDi/SQuAD).",
+    )
     parser.add_argument("--controller_kp", type=float, default=0.5, help="PI controller P gain (default 0.5). Lower = slower alpha ramp.")
     parser.add_argument("--controller_ki", type=float, default=1e-5, help="PI controller I gain (default 1e-5).")
     parser.add_argument("--phase1_steps", type=int, default=0,
@@ -397,6 +403,7 @@ def main():
                 gate_layer_index=gl,
                 gate_k=-30.0,
                 gate_threshold_ratio=gtr,
+                use_pre_deletion_blend=args.use_pre_deletion_blend,
             )
         else:
             model = MrXLMRobertaForSequenceClassification.from_pretrained_xlm(
@@ -412,6 +419,7 @@ def main():
             gate_layer_index=gl,
             gate_k=-30.0,
             gate_threshold_ratio=gtr,
+            use_pre_deletion_blend=args.use_pre_deletion_blend,
             attn_implementation="eager",
         )
     else:

@@ -109,7 +109,7 @@ class MrXLMRobertaModel(XLMRobertaModel):
         return_gate: bool = False,
     ):
         """
-        Returns (hidden_states, gate, keep_indices, kept_lengths).
+        Returns (hidden_states, gate, keep_indices, kept_lengths, pre_deletion_hidden).
 
         When use_soft_deletion=True or return_gate=False, keep_indices and kept_lengths are None.
         When use_soft_deletion=False (hard deletion), keep_indices[b, j] is the original token
@@ -122,12 +122,17 @@ class MrXLMRobertaModel(XLMRobertaModel):
 
         keep_indices_out: torch.Tensor | None = None
         kept_lengths_out: torch.Tensor | None = None
+        pre_deletion_hidden: torch.Tensor | None = None
 
         # Layers 0 .. gate_layer (inclusive)
         for i in range(gate_layer_index + 1):
             layer = layers[i]
             layer_outputs = layer(hidden_states, attention_mask=attention_mask, head_mask=head_mask[i] if head_mask else None)
             hidden_states = layer_outputs[0] if isinstance(layer_outputs, tuple) else layer_outputs
+
+        # Save hidden states right before the gate fires (used by QA blending).
+        if getattr(self.mrxlm_config, "use_pre_deletion_blend", True):
+            pre_deletion_hidden = hidden_states
 
         # Delete gate after layer gate_layer_index
         gate = self.delete_gate(hidden_states)  # (batch, seq_len)
@@ -200,8 +205,21 @@ class MrXLMRobertaModel(XLMRobertaModel):
                 hidden_states = layer_outputs[0] if isinstance(layer_outputs, tuple) else layer_outputs
 
         if return_gate:
-            return hidden_states, gate, keep_indices_out, kept_lengths_out
-        return hidden_states, None, None, None
+            return hidden_states, gate, keep_indices_out, kept_lengths_out, pre_deletion_hidden
+        return hidden_states, None, None, None, pre_deletion_hidden
+
+    @staticmethod
+    def _blend_pre_deletion(
+        sequence_output: torch.Tensor,
+        pre_deletion_hidden: torch.Tensor | None,
+        gate: torch.Tensor | None,
+        gate_k: float,
+    ) -> torch.Tensor:
+        """Blend final hidden with pre-gate hidden using gate-derived weights."""
+        if pre_deletion_hidden is None or gate is None:
+            return sequence_output
+        weights = torch.clamp(-gate / abs(gate_k), 0.0, 1.0).unsqueeze(-1)  # (batch, seq, 1)
+        return (1.0 - weights) * sequence_output + weights * pre_deletion_hidden
 
     def forward(
         self,
@@ -265,7 +283,7 @@ class MrXLMRobertaModel(XLMRobertaModel):
             past_key_values_length=0,
         )
 
-        hidden_states, gate, keep_indices, kept_lengths = self._encoder_forward_with_gate(
+        hidden_states, gate, keep_indices, kept_lengths, pre_deletion_hidden = self._encoder_forward_with_gate(
             embedding_output,
             extended_attention_mask,
             head_mask,
@@ -302,6 +320,7 @@ class MrXLMRobertaModel(XLMRobertaModel):
             model_output.gate = gate  # type: ignore[attr-defined]
             model_output.keep_indices = keep_indices  # type: ignore[attr-defined]
             model_output.kept_lengths = kept_lengths  # type: ignore[attr-defined]
+            model_output.pre_deletion_hidden = pre_deletion_hidden  # type: ignore[attr-defined]
 
         return model_output
 
@@ -413,6 +432,7 @@ class MrXLMRobertaForQuestionAnswering(nn.Module):
         gate_layer_index: int = 3,
         gate_k: float = -30.0,
         gate_threshold_ratio: float = 0.5,
+        use_pre_deletion_blend: bool = True,
         **kwargs,
     ) -> "MrXLMRobertaForQuestionAnswering":
         """Load XLM-R weights and add MrXLM gate; QA head from XLMRobertaForQuestionAnswering."""
@@ -423,6 +443,7 @@ class MrXLMRobertaForQuestionAnswering(nn.Module):
         config.gate_layer_index = gate_layer_index
         config.gate_k = gate_k
         config.gate_threshold_ratio = gate_threshold_ratio
+        config.use_pre_deletion_blend = use_pre_deletion_blend
 
         model = cls(config)
         model.mrxlm.load_state_dict(hf_qa.roberta.state_dict(), strict=False)
@@ -454,6 +475,13 @@ class MrXLMRobertaForQuestionAnswering(nn.Module):
         keep_indices = getattr(outputs, "keep_indices", None)
         kept_lengths = getattr(outputs, "kept_lengths", None)
         sequence_output = outputs.last_hidden_state if hasattr(outputs, "last_hidden_state") else outputs[0]
+        if getattr(self.config, "use_pre_deletion_blend", True):
+            sequence_output = self.mrxlm._blend_pre_deletion(
+                sequence_output=sequence_output,
+                pre_deletion_hidden=getattr(outputs, "pre_deletion_hidden", None),
+                gate=gate,
+                gate_k=self.mrxlm.gate_k,
+            )
         logits = self.qa_outputs(sequence_output)  # (batch, seq_len, 2)
         start_logits = logits[:, :, 0]
         end_logits = logits[:, :, 1]

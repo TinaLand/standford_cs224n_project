@@ -121,7 +121,7 @@ class MrBertModel(BertModel):
         use_soft_deletion: bool,
         return_gate: bool = False,
     ):
-        """Returns (hidden_states, gate, keep_indices, kept_lengths).
+        """Returns (hidden_states, gate, keep_indices, kept_lengths, pre_deletion_hidden).
         When use_soft_deletion=True or return_gate=False, keep_indices and kept_lengths are None.
         When use_soft_deletion=False (hard deletion), keep_indices[b, j] = original token index of j-th kept token in batch b; kept_lengths[b] = number of kept tokens (for QA coordinate re-mapping)."""
         encoder = self.encoder
@@ -129,12 +129,17 @@ class MrBertModel(BertModel):
         layers = encoder.layer
         keep_indices_out: torch.Tensor | None = None
         kept_lengths_out: torch.Tensor | None = None
+        pre_deletion_hidden: torch.Tensor | None = None
 
         # Layers 0 .. gate_layer (inclusive)
         for i in range(gate_layer_index + 1):
             layer = layers[i]
             layer_outputs = layer(hidden_states, attention_mask=attention_mask)
             hidden_states = layer_outputs[0] if isinstance(layer_outputs, tuple) else layer_outputs
+
+        # Save hidden states right before the gate fires (used by QA blending).
+        if getattr(self.mrbert_config, "use_pre_deletion_blend", True):
+            pre_deletion_hidden = hidden_states
 
         # Delete gate after layer gate_layer_index
         gate = self.delete_gate(hidden_states)  # (batch, seq_len)
@@ -193,8 +198,22 @@ class MrBertModel(BertModel):
                 hidden_states = layer_outputs[0] if isinstance(layer_outputs, tuple) else layer_outputs
 
         if return_gate:
-            return hidden_states, gate, keep_indices_out, kept_lengths_out
-        return hidden_states, None, None, None
+            return hidden_states, gate, keep_indices_out, kept_lengths_out, pre_deletion_hidden
+        return hidden_states, None, None, None, pre_deletion_hidden
+
+    @staticmethod
+    def _blend_pre_deletion(
+        sequence_output: torch.Tensor,
+        pre_deletion_hidden: torch.Tensor | None,
+        gate: torch.Tensor | None,
+        gate_k: float,
+    ) -> torch.Tensor:
+        """Blend final hidden with pre-gate hidden using gate-derived weights."""
+        if pre_deletion_hidden is None or gate is None:
+            return sequence_output
+        # gate shape: (batch, seq), range [gate_k, 0] with gate_k < 0
+        weights = torch.clamp(-gate / abs(gate_k), 0.0, 1.0).unsqueeze(-1)  # (batch, seq, 1)
+        return (1.0 - weights) * sequence_output + weights * pre_deletion_hidden
 
     def forward(
         self,
@@ -252,7 +271,7 @@ class MrBertModel(BertModel):
             past_key_values_length=0,
         )
 
-        hidden_states, gate, keep_indices, kept_lengths = self._encoder_forward_with_gate(
+        hidden_states, gate, keep_indices, kept_lengths, pre_deletion_hidden = self._encoder_forward_with_gate(
             embedding_output,
             extended_attention_mask,
             head_mask,
@@ -281,6 +300,8 @@ class MrBertModel(BertModel):
         if keep_indices is not None:
             outputs.keep_indices = keep_indices
             outputs.kept_lengths = kept_lengths
+        if pre_deletion_hidden is not None:
+            outputs.pre_deletion_hidden = pre_deletion_hidden
         if return_gate and gate is not None:
             return outputs, gate
         return outputs
@@ -381,9 +402,11 @@ class MrBertForQuestionAnswering(nn.Module):
         """Load BERT weights and add MrBERT gate; QA head from BertForQuestionAnswering."""
         from transformers import BertForQuestionAnswering
 
+        use_pre_deletion_blend = mrbert_kwargs.pop("use_pre_deletion_blend", True)
         bert_qa = BertForQuestionAnswering.from_pretrained(bert_name_or_path)
         bert_config = bert_qa.config
         config = MrBertConfig(**{**bert_config.to_dict(), **mrbert_kwargs})
+        config.use_pre_deletion_blend = use_pre_deletion_blend
         model = cls(config)
         model.mrbert.load_state_dict(bert_qa.bert.state_dict(), strict=False)
         model.qa_outputs.load_state_dict(bert_qa.qa_outputs.state_dict())
@@ -414,6 +437,13 @@ class MrBertForQuestionAnswering(nn.Module):
         keep_indices = getattr(outputs, "keep_indices", None)
         kept_lengths = getattr(outputs, "kept_lengths", None)
         sequence_output = outputs.last_hidden_state if hasattr(outputs, "last_hidden_state") else outputs[0]
+        if getattr(self.config, "use_pre_deletion_blend", True):
+            sequence_output = self.mrbert._blend_pre_deletion(
+                sequence_output=sequence_output,
+                pre_deletion_hidden=getattr(outputs, "pre_deletion_hidden", None),
+                gate=gate,
+                gate_k=self.mrbert.gate_k,
+            )
         logits = self.qa_outputs(sequence_output)  # (batch, seq_len, 2)
         start_logits = logits[:, :, 0]
         end_logits = logits[:, :, 1]
