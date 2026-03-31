@@ -1,6 +1,6 @@
 GitHub:
 - **repo1: Alina Huang (this repo)** `https://github.com/TinaLand/standford_cs224n_project`
-- **repo2: Hiva Zaad**: `https://github.com/repo2Mohammadzadeh1/CS224N-project`
+- **repo2 (comparison codebase)**: `https://github.com/HivaMohammadzadeh1/CS224N-project`
 
 ---
 ## Summary
@@ -10,7 +10,7 @@ The **conclusions** are given **immediately after each table** in Section 6 (Con
 1. **Baseline strength dominates absolute accuracy.** Differences in SNLI/SST-2/MRPC (e.g. 74% vs 90%) come from **epochs and schedule**.
 2. **Delta from baseline is more comparable.** Our gate adds **+15 to +25 pp** on SNLI/SST-2 over a weak baseline; repo2's gate keeps a strong baseline almost unchanged (−0.27 to −0.62 pp). So the **same mechanism** behaves as "corrector" in our setting and "preserver" in repo2's.
 3. **Task sensitivity.** BERT: SNLI/SST-2/XNLI tolerate high deletion; MRPC/IMDB/TyDi are sensitive. XLM-R: only MRPC shows a clear gain with the gate (our A100); SST-2/SNLI/IMDB/XNLI drop.
-4. **Blending is critical for QA.** TyDi 0.10 (no blend) → 0.30 (blend L3) → 0.35 (blend L9) in repo2's data; we get 0.28 without blending. The **0.07 EM gap** is explained by **pre-deletion blending + gate layer**, not hardware.
+4. **Blending is critical for QA.** In repo2's ablations: TyDi 0.10 (no blend, L3) → 0.30 (blend L3) → 0.35 (blend L9). We now implement blending in repo1; on **Modal A100** (3 epochs, gate L3, ~25% train deletion, TyDi QA validation EM), a controlled A/B shows **0.3778 EM with blending vs 0.3471 without** (~**+3.1 pp**). Earlier **L4 / 1 epoch** runs without blending reached **~0.28 EM** at ~11% deletion—**schedule, deletion level, and blending** all move the number; the old **~0.07 EM** gap vs repo2's **0.35** is **not** explained by GPU alone.
 5. **Actual deletion rate does not alone predict accuracy.** MRPC (repo2): 5.7% deletion but −17 pp; SNLI (us): 76% deletion but 89% accuracy. So **task structure and optimization** matter as much as deletion magnitude.
 6. **XLM-R on A100:** Same GPU, different baselines and outcomes—confirms that **training setup** (epochs, data, seed, gate/controller) drives the numbers; GPU does not change accuracy.
 
@@ -31,7 +31,7 @@ At a high level, our implementation matches repo2's report in four areas: **mode
 |----------|---------------------|---------------------|------|
 | **Model + gate** | Delete gate after encoder layer 3; LayerNorm → Linear(768→1) → Sigmoid · k (k = −30); soft deletion = add G as attention bias; hard deletion = remove tokens with G < k/2; keep [CLS]/[SEP], delete [PAD]. | `DeleteGate` in `mrbert/modeling_mrbert.py` with `gate_layer_index=3`, `gate_k=-30`; `_run_layer_with_soft_gate` adds gate to attention scores; hard path in `_encoder_forward_with_gate` thresholds at `gate_k * gate_threshold_ratio` (k/2), keeps CLS, gathers kept tokens, rebuilds the attention mask. | **Core mechanism is fully aligned**; differences come later from init / PI hyperparameters / QA blending. |
 | **PI controller + loss** | L = L_task + α·L_deletion, L_deletion = mean(G); α_t updated by a PI controller: error e_t = δ − r_t, P/I updates, α_t = max(0, p_t + i_t); γ=0.9 for EMA. | `get_gate_regularizer_loss(gate)=gate.mean()`; `PIController.step()` implements the same rule: compute error from current deletion ratio, update P/I, set α = max(0, kp*P + ki*I) with default `pi_gamma=0.9`. | **Control logic matches**; the only difference is the default `kp` (report: 0.01, this repo: 0.5). |
-| **QA span remap + ragged batch** | After hard deletion, predict spans on the **shortened sequence**, then map back to original token indices via keep indices / lengths; batch items have different lengths, handled via ragged / gather-style ops. | `MrBertForQuestionAnswering` / `MrXLMRobertaForQuestionAnswering` output `keep_indices` and `kept_lengths` for span remap; after hard deletion, `max_kept + torch.gather + length mask` build a variable-length batch, matching the "QA span coordinate remapping / ragged tensors" description. | **QA pipeline design is aligned**; the main difference is that this repo currently **does not implement pre-deletion blending**. |
+| **QA span remap + ragged batch** | After hard deletion, predict spans on the **shortened sequence**, then map back to original token indices via keep indices / lengths; batch items have different lengths, handled via ragged / gather-style ops. | `MrBertForQuestionAnswering` / `MrXLMRobertaForQuestionAnswering` output `keep_indices` and `kept_lengths` for span remap; after hard deletion, `max_kept + torch.gather + length mask` build a variable-length batch, matching the "QA span coordinate remapping / ragged tensors" description. | **QA pipeline design is aligned.** This repo now also implements **pre-deletion blending** (`--use_pre_deletion_blend` / `MrBertConfig.use_pre_deletion_blend`), matching repo2's QA stabilization idea. |
 | **Tasks & metrics** | SNLI, SST-2, MRPC, IMDB, TyDi QA; plus XNLI for XLM-R; classification evaluated with validation accuracy, QA with EM; backbones are BERT-base / XLM-R-base. | `train_mrbert.py --dataset` supports mrpc, imdb, sst2, snli, xnli, tydiqa; `--backbone` selects `bert` / `xlmr`, corresponding to `MrBertModel` / `MrXLMRobertaModel`; classification uses accuracy and TyDi uses EM, consistent with the report. | **Tasks and metrics are aligned**, so numerical comparisons are meaningful. |
 
 ---
@@ -42,7 +42,7 @@ Single overview: Repo2 (repo2/report) vs Repo1 (this codebase).
 
 | Category | Feature / Parameter | Repo 2 (Report / Ideal) | Repo 1 (Current Code) | Impact of the Choice | Actual Data / Result Impact |
 |----------|---------------------|--------------------------|------------------------|----------------------|-----------------------------|
-| Algorithm | Pre-deletion Blending | Enabled (L9/L3) | Disabled (no blending; soft delete only, then hard delete) | Without blending, deleted tokens' information is lost, causing QA boundaries to collapse. | TyDi QA EM: **0.35** (Repo 2, with blending) vs **0.28** (Repo 1, no blending) → blending adds ~**7 pp** EM. |
+| Algorithm | Pre-deletion Blending | Enabled (L9/L3) | Implemented in repo1 (default on for QA; A/B via `--no-use_pre_deletion_blend`) | Without blending, hard deletion can hurt span features; blending re-injects pre-gate hidden states. | **Repo2:** TyDi **0.35** EM (blend + L9). **Repo1 (older L4, 1 ep):** **~0.28** EM no blend, ~11% del. **Repo1 (Modal A100, Mar 2026, 3 ep, L3, ~25% del):** **0.347** no blend vs **0.378** blend → **~+3.1 pp** EM at matched deletion. |
 | Init | Gate Bias (b) | b = 10.0 (conservative, almost no early deletion) | b = 0.0 (default / random) | Low bias allows more random deletions early on, destabilizing pre-trained weights. | IMDB stability issue: one Repo 1 run collapsed to **57.42%** accuracy; repo2’s IMDB stays near **94%**. |
 | Control | PI Gain (k_p) | k_p = 0.01 (stable, slow controller) | k_p = 0.5 (aggressive default) | High k_p makes the controller react too sharply, causing deletion-rate oscillations. | Repo 1’s deletion rate fluctuates more before reaching steady state compared to Repo 2’s smoother traces. |
 | Opt | Gate Learning Rate | Separate gate lr = 10^−4 | Shared with backbone | A shared high LR can make the small gate parameter “over-shoot” and fail to converge cleanly. | Observed task-sensitive deletion rates (e.g., MRPC / IMDB) in Repo 1, consistent with more fragile gate optimization. |
@@ -67,7 +67,7 @@ Our BERT runs are on **L4** (1 epoch, batch 24, gate warmup 1000, target 0.3 or 
 | **MRPC** | 68.38% (0.3) | 68.63% | 53.8% | **86.03%** | **68.71%** | 5.7% |
 | **MRPC** (0.5) | 68.87% | 68.38% | 30.1% | — | — | — |
 | **IMDB** | 87.85% (0.3) | 57.42% | 4.7% | **93.97%** | **93.03%** | 43.7% (avg seq) |
-| **TyDi QA (EM)** | 20.18% (0.3) | **28.16%** | 10.9% | 0.40 (no blend) | **0.35** (blend L9) | ~24.7% |
+| **TyDi QA (EM)** | 20.18% (0.3) | **28.16%** (L4, 1 ep, no blend) **; 34.71% / 37.78%** (Modal A100, 3 ep, L3; no blend / blend A/B) | 10.9% **; ~25.3% / ~25.9%** | 0.40 (no blend) | **0.35** (blend L9) | ~24.7% |
 | **XNLI** | 74.82% (0.3) | **80.56%** | 65.4% | — | — | — |
 
 **Conclusion (4.1):**
@@ -75,7 +75,7 @@ Our BERT runs are on **L4** (1 epoch, batch 24, gate warmup 1000, target 0.3 or 
 - **Baseline gap (absolute accuracy).** Baseline gaps (our L4 1 ep vs repo2 A100 3–5 ep) are **+16 to +29 pp** on SNLI/SST-2/MRPC—driven by **epochs / training schedule**, not GPU type.
 - **Delta from baseline (relative gain).** We get **+15 to +25 pp** on SNLI/SST-2 (gate corrects a weak baseline); repo2 gets **−0.27 to −0.62 pp** (gate preserves a strong baseline). **Same mechanism**, but in our setting it behaves like a *corrector*, in repo2 like a *preserver*.
 - **MRPC sensitivity.** On MRPC we are essentially flat; repo2 drops **−17.32 pp** despite only **5.7%** deletion → indicates **task / small-data / controller dynamics** sensitivity rather than pure deletion rate.
-- **TyDi QA and blending.** We reach **~0.28 EM** (+7.98 pp) on TyDi **without blending**; repo2 reaches **0.35 EM** with **pre-deletion blending + L9 gate**, and the **0.07 EM gap** is explained by that mechanism choice, not hardware.
+- **TyDi QA and blending.** On **L4 (1 ep)** we reached **~0.28 EM** without blending (+7.98 pp vs weak baseline). On **Modal A100 (3 ep, L3, ~25% deletion)**, pre-deletion blending adds **~+3.1 pp EM** (**0.3778 vs 0.3471**) in a matched A/B. repo2 reports **0.35 EM** with **blending + L9**; our **0.378** single run is in the same ballpark but **not** an apples-to-apples replicate (gate depth, seeds, W&B naming on one job were inconsistent—use `modal_logs` + `[Training args]` in logs for traceability).
 - **SNLI ablations and PI.** *From repo2’s report (SNLI ablations):* MrBERT-0% 90.50%, Random 30% 87.26%, No-PI 30% 86.47% (88.9% del)—showing that **random deletion underperforms** and **removing PI degrades performance**, so the **PI controller is necessary** for stable deletion targeting.
 
 ### 4.2 XLM-R (MrXLM): Direct comparison (both A100)
@@ -119,14 +119,14 @@ Our BERT runs are on **L4** (1 epoch, batch 24, gate warmup 1000, target 0.3 or 
 | SST-2   | **+24.66** (67.89→92.55) | **−0.62** (97.29→96.67) | Same pattern: we gain 24.66 pp; repo2 loses 0.62 pp. |
 | MRPC    | +0.25 (68.38→68.63)   | **−17.32** (86.03→68.71) | We are flat; repo2 has a large drop. MRPC is sensitive: with a strong baseline and same nominal "30% target," her setup deletes only 5.7% but accuracy collapses—likely **task + small data + gate dynamics**. |
 | IMDB    | **−30.43** (87.85→57.42) | −0.94 (93.97→93.03) | We **collapse** (gate barely activates, 4.7% del; run unstable). repo2 stays near baseline. Our IMDB is an outlier; repo2's longer max sequence length and more epochs make their run much more stable. |
-| TyDi QA  | **+7.98** (20.18→28.16% EM) | −0.05 (0.40→0.35 with blend L9) | We gain ~8 pp EM without blending; repo2 stays near BERT with blending. Our 0.28 EM is below her 0.35—**blending** recovers the gap. |
+| TyDi QA  | **+7.98** (20.18→28.16% EM, L4/no blend) | −0.05 (0.40→0.35 with blend L9) | L4: large Δ vs weak baseline. A100 A/B (~25% del, L3): **+3.1 pp** with blending (**0.3778 vs 0.3471**). repo2 **0.35** uses L9—compare setups, not just GPU. |
 
 **Takeaway:**
 
 - **SNLI / SST-2: gate helps weak baselines, preserves strong ones.** On SNLI and SST-2, our **positive Δ** shows the gate helps when the baseline is underconverged; repo2's **small negative Δ** shows the gate preserves a strong baseline. The **gate is not hurting** in either case—the apparent difference is **baseline strength**, not the mechanism.
 - **MRPC: small-data, paraphrase-sensitive, and fragile.** MRPC is the only task where repo2's gated model drops a lot (−17.32 pp) despite low actual deletion (5.7%), suggesting **dataset size and paraphrase sensitivity** interact badly with the gate/controller in that run.
 - **IMDB: instability vs stability.** IMDB on our side is unstable (one run collapses), while repo2's longer sequences and more epochs keep accuracy high—pointing again to **training schedule and input length**, not GPU.
-- **TyDi: blending is the key lever.** Our +7.98 pp gain is without blending; repo2's 0.35 EM with blending shows that **pre-deletion blending (plus L9 gate)** is the main lever for closing the QA gap, beyond just deletion rate.
+- **TyDi: blending is the key lever.** L4 data: +7.98 pp gated vs baseline without blend. Modal A100: **~+3.1 pp EM** when toggling blend at matched ~25% deletion. repo2's **0.35** with L9+blend shows **gate depth + blending** still matter for the best tradeoff.
 
 #### 4.4.2 Actual deletion rate vs accuracy
 
@@ -135,13 +135,13 @@ Our BERT runs are on **L4** (1 epoch, batch 24, gate warmup 1000, target 0.3 or 
 | SNLI    | 76.1%                | 89.02%             | 30.8%            | 90.21%         | We delete **much more** (76% vs 31%) but still reach 89%; repo2 deletes less and keeps 90%. So **higher deletion can still retain high accuracy** on SNLI (redundancy). |
 | SST-2   | 61.8%                | 92.55%             | 47.4%            | 96.67%         | Same pattern: we delete more, accuracy slightly lower in absolute terms but both are high. |
 | MRPC    | 53.8%                | 68.63%             | **5.7%**         | 68.71%         | repo2's model **barely deletes** (5.7%) yet **drops 17 pp**; we delete 54% and are flat. Suggests on MRPC, **deletion rate alone does not explain the drop**—likely controller/init or data sensitivity. |
-| TyDi QA | 10.9%                | 28.16% EM          | ~24.7%           | 0.35 EM        | We keep deletion low (11%) and get 0.28 EM; repo2 targets ~25% with **blending** and reaches 0.35. **Controlled deletion + blending** beats "low deletion, no blend." |
+| TyDi QA | 10.9% (**L4**) / ~25% (**A100 A/B**) | 28.16% / 34.71–37.78% EM | ~24.7%           | 0.35 EM        | Low del + no blend (L4) yields 0.28 EM; **~25% del + blend** (A100) reaches **0.378** vs **0.347** without—at similar deletion, **blending** dominates. repo2's **0.35** at ~25% del aligns with our blended run, not L4. |
 
 **Takeaway:**
 
 - **SNLI / SST-2 are highly redundant.** These tasks tolerate **high actual deletion** (47–76%) with only a small accuracy cost, consistent with substantial **token-level redundancy**.
 - **MRPC (repo2) shows optimization issues, not just deletion.** MRPC on repo2 has **low deletion (5.7%)** but a **large accuracy drop**, pointing toward **optimization / regularization** effects (e.g., gate init, weight decay, small dataset) rather than deletion magnitude alone.
-- **TyDi: mechanism > deletion rate.** On TyDi, **blending + moderate deletion (~25%)** yields better EM than **no blending with low deletion (~11%)**, showing that the **mechanism (pre-deletion blending) matters more than raw deletion rate** for QA performance.
+- **TyDi: mechanism and level both matter.** **Blending + ~25% deletion** (A100) reaches **higher EM** than **no blend at ~25%** (+3.1 pp); **low deletion (~11%) + no blend** (L4) sits lower (**0.28**). So **blending** and **training depth/deletion regime** jointly set EM—not deletion rate alone.
 
 #### 4.4.3 XLM-R (both A100): direct comparison with Δ
 
@@ -166,17 +166,40 @@ Same GPU (A100), so differences are **purely from setup** (epochs, data, seed, g
 
 | Config              | Baseline EM | Gated EM | Actual del% | Note                          |
 |---------------------|-------------|----------|-------------|--------------------------------|
-| Codebase (no blend) | 20.18%      | **28.16%** | 10.9%     | Span remap + warmup only.      |
+| Codebase (L4, no blend) | 20.18%      | **28.16%** | 10.9%     | Span remap + warmup; 1 ep.   |
+| Codebase (Modal A100, no blend, L3) | — | **34.71%** | ~25.3% | 3 ep; `run_mrbert_tydi_modal.py` + `--no-use-pre-deletion-blend`. Log: `modal_logs/tydiqa_modal_EM03471_ap-4FzTHi10GW6ipDKX7fZ9TC.log`. |
+| Codebase (Modal A100, blend, L3) | — | **37.78%** | ~25.9% | 3 ep; `--use-pre-deletion-blend`. Log: `modal_logs/tydiqa_modal_EM03778_ap-IEe2gcBxFgDvH62acNX22v`. **~+3.1 pp** vs no-blend row. |
 | repo2 (no blend, L3) | 0.40        | **0.10**   | 60.7%     | Gate collapses; EM collapses. |
 | repo2 (blend, L3)    | —           | **0.30**   | ~0%      | Blending stabilises; gate stops deleting. |
-| repo2 (blend, L9)    | 0.40        | **0.35**   | ~24.7%   | Best: near-baseline EM with ~25% deletion. |
+| repo2 (blend, L9)    | 0.40        | **0.35**   | ~24.7%   | Best reported tradeoff in repo2. |
 
 **Analysis:**
 
-- **No blending at L3 collapses TyDi.** Without blending, repo2's gate at L3 **over-deletes** (60.7%) and EM drops to **0.10**—the QA representation collapses.
-- **Blending at L3 stabilises but stops deletion.** With blending at L3, the gate **stops deleting** (~0%) and EM recovers to **0.30**, but we lose any compression benefit.
-- **Blending at L9 gives the best tradeoff.** Moving the gate to **L9 with blending** yields **0.35 EM** with **~25% deletion**, which is the best accuracy–compression tradeoff in repo2.
-- **Our codebase is close but slightly worse.** Our codebase reaches **0.28 EM** with **10.9% deletion** and **no blending**; the **0.35 − 0.28 ≈ 0.07 EM** gap is attributable to **blending + deeper gate (L9)**, not hardware (GPU).
+- **No blending at L3 collapses TyDi (repo2's extreme case).** Without blending, repo2's gate at L3 **over-deletes** (60.7%) and EM drops to **0.10**—the QA representation collapses.
+- **Blending at L3 stabilises but can stop deletion (repo2).** With blending at L3, repo2's gate **stops deleting** (~0%) and EM recovers to **0.30**, but compression is lost in that report row.
+- **Blending at L9 gives the best tradeoff (repo2).** **L9 with blending** yields **0.35 EM** with **~25% deletion** in repo2's table.
+- **Our A100 A/B at L3.** With blending implemented, we get **0.3778 EM** vs **0.3471** without, at **~25–26%** train deletion—direct evidence that **blending helps QA** even before moving the gate to L9. The older **0.28 EM (L4, 1 ep, ~11% del, no blend)** is not comparable to these A100 rows (epochs, deletion, hardware differ).
+- **Extra Modal run.** `modal_logs/tydiqa_modal_EM03499_ap-rqoNveoPynOFoc2iKRSCnA.log` (**0.3499 EM**, overlapping launch) is a third TyDi job from the same campaign; use **`[Training args]`** in stdout (after `train_mrbert.py` update) to disambiguate flags vs W&B run names.
+
+Commands for the two primary logs (from repo root; requires Modal + `wandb-api-key` secret):
+
+```bash
+# No blend (matches 0.3471 log / ap-4FzT…)
+modal run --detach run_mrbert_tydi_modal.py \
+  --no-use-pre-deletion-blend \
+  --wandb-project mrbert-tydiqa --wandb-run-name tydiqa-no-blend-l3-30pct \
+  --batch-size 16 --epochs 3 --max-length 256 --lr 2e-5 \
+  --target-deletion 0.3 --gate-layer-index 3 --gate-threshold-ratio 0.5 \
+  --gate-warmup-steps 1000 --use-pi --controller-kp 0.5 --controller-ki 1e-5
+
+# With blend (matches 0.3778 log / ap-IEe2…)
+modal run --detach run_mrbert_tydi_modal.py \
+  --use-pre-deletion-blend \
+  --wandb-project mrbert-tydiqa --wandb-run-name tydiqa-with-blend-l3-30pct \
+  --batch-size 16 --epochs 3 --max-length 256 --lr 2e-5 \
+  --target-deletion 0.3 --gate-layer-index 3 --gate-threshold-ratio 0.5 \
+  --gate-warmup-steps 1000 --use-pi --controller-kp 0.5 --controller-ki 1e-5
+```
 
 ---
 
@@ -188,7 +211,7 @@ Same GPU (A100), so differences are **purely from setup** (epochs, data, seed, g
 | **SNLI MrBERT** | 89.02% | 90.21% | Baseline + setup |
 | **SST-2 baseline** | 67–80% | 97.29% | Epochs / setup |
 | **MRPC baseline** | ~68% | 86% | Epochs / setup (e.g. 5 ep MRPC) |
-| **TyDi QA EM (gated)** | ~0.28 (no blend) | 0.35 (blend, L9) | **Pre-deletion blending** + gate layer |
+| **TyDi QA EM (gated)** | ~0.28 (L4, 1 ep, no blend); **0.347 / 0.378** (Modal A100, L3, no blend / blend) | 0.35 (blend, L9) | **Blending + epochs + gate depth**; A100 A/B isolates ~**+3.1 pp** from blend at L3 |
 | **XLM-R SNLI (A100)** | 33.82% bl / 33.82% MrXLM | 89.85% bl / 82.27% MrXLM | Different baselines (setup); both show fragility |
 | **Latency** | T4, 30–55% speedup | A100, 1.89× | **GPU** + same idea |
 

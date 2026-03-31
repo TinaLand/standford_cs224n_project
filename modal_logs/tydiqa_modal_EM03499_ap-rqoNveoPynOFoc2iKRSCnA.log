@@ -1,0 +1,159 @@
+--use-pre-deletion-blend → 0.3778 EM
+2026-03-30 20:59:29-07:00 Warning: You are sending unauthenticated requests to the HF Hub. Please set a HF_TOKEN to enable higher rate limits and faster downloads.
+2026-03-30 20:59:34-07:00 Device: cuda
+2026-03-30 20:59:34-07:00 Loading dataset: tydiqa (backbone=bert)
+2026-03-30 20:59:34-07:00 
+2026-03-30 20:59:34-07:00 [1A2026-03-30 20:59:34-07:00 Generating train split:   0%|          | 0/49881 [00:00<?, ? examples/s]
+2026-03-30 20:59:34-07:00 [1A2026-03-30 20:59:34-07:00 Generating train split:  72%|███████▏  | 36000/49881 [00:00<00:00, 348921.99 examples/s]
+2026-03-30 20:59:34-07:00 [1A2026-03-30 20:59:34-07:00 Generating train split: 100%|██████████| 49881/49881 [00:00<00:00, 383080.00 examples/s]
+2026-03-30 20:59:34-07:00 
+2026-03-30 20:59:34-07:00 [1A2026-03-30 20:59:34-07:00 Generating validation split:   0%|          | 0/5077 [00:00<?, ? examples/s]
+2026-03-30 20:59:34-07:00 [1A2026-03-30 20:59:34-07:00 Generating validation split: 100%|██████████| 5077/5077 [00:00<00:00, 280633.65 examples/s]
+2026-03-30 21:00:30-07:00 
+2026-03-30 21:00:30-07:00 [1A2026-03-30 21:00:30-07:00 Loading weights:   0%|          | 0/197 [00:00<?, ?it/s]
+2026-03-30 21:00:30-07:00 [1A2026-03-30 21:00:30-07:00 Loading weights: 100%|██████████| 197/197 [00:00<00:00, 2786.28it/s]
+2026-03-30 21:00:30-07:00 [1mBertForQuestionAnswering LOAD REPORT[0m from: bert-base-uncased
+2026-03-30 21:00:30-07:00 Key                                        | Status     |
+2026-03-30 21:00:30-07:00 -------------------------------------------+------------+-
+2026-03-30 21:00:30-07:00 cls.predictions.bias                       | UNEXPECTED |
+2026-03-30 21:00:30-07:00 cls.predictions.transform.LayerNorm.bias   | UNEXPECTED |
+2026-03-30 21:00:30-07:00 bert.pooler.dense.bias                     | UNEXPECTED |
+2026-03-30 21:00:30-07:00 bert.pooler.dense.weight                   | UNEXPECTED |
+2026-03-30 21:00:30-07:00 cls.predictions.transform.dense.bias       | UNEXPECTED |
+2026-03-30 21:00:30-07:00 cls.seq_relationship.bias                  | UNEXPECTED |
+2026-03-30 21:00:30-07:00 cls.seq_relationship.weight                | UNEXPECTED |
+2026-03-30 21:00:30-07:00 cls.predictions.transform.dense.weight     | UNEXPECTED |
+2026-03-30 21:00:30-07:00 cls.predictions.transform.LayerNorm.weight | UNEXPECTED |
+2026-03-30 21:00:30-07:00 qa_outputs.weight                          | MISSING    |
+2026-03-30 21:00:30-07:00 qa_outputs.bias                            | MISSING    |
+2026-03-30 21:00:30-07:00 
+2026-03-30 21:00:30-07:00 Notes:
+2026-03-30 21:00:30-07:00 - UNEXPECTED: can be ignored when loading from different task/architecture; not ok if you expect identical arch.
+2026-03-30 21:00:30-07:00 - MISSING:    those params were newly initialized because missing from the checkpoint. Consider training on your downstream task.
+2026-03-30 21:00:31-07:00 wandb: [wandb.login()] Loaded credentials for https://api.wandb.ai from WANDB_API_KEY.
+2026-03-30 21:00:31-07:00 wandb: Currently logged in as: huihuijiang0619 (huihuijiang0619-) to https://api.wandb.ai. Use `wandb login --relogin` to force relogin
+2026-03-30 21:00:32-07:00 wandb: setting up run ymcmbmsw
+2026-03-30 21:00:32-07:00 wandb: Tracking run with wandb version 0.25.1
+2026-03-30 21:00:32-07:00 wandb: Run data is saved locally in /workspace/wandb/run-20260331_040031-ymcmbmsw
+2026-03-30 21:00:32-07:00 wandb: Run `wandb offline` to turn off syncing.
+2026-03-30 21:00:32-07:00 wandb: Syncing run tydiqa-with-blend-l3-30pct
+2026-03-30 21:00:32-07:00 wandb: ⭐️ View project at https://wandb.ai/huihuijiang0619-/mrbert-tydiqa
+2026-03-30 21:00:32-07:00 wandb: 🚀 View run at https://wandb.ai/huihuijiang0619-/mrbert-tydiqa/runs/ymcmbmsw
+2026-03-30 21:00:32-07:00 `use_return_dict` is deprecated! Use `return_dict` instead!
+2026-03-30 21:22:23-07:00 wandb: updating run metadata
+2026-03-30 21:22:23-07:00 wandb: uploading history steps 71-71, summary, console lines 80-82
+2026-03-30 21:22:23-07:00 wandb: 
+2026-03-30 21:22:23-07:00 wandb: Run history:
+2026-03-30 21:22:23-07:00 wandb:                 duration_sec ▁
+2026-03-30 21:22:23-07:00 wandb:                        epoch ▁▅█
+2026-03-30 21:22:23-07:00 wandb:                     pi/alpha ▄▅▁▃▅▃▃▄▅▆▃▇▆▄▇▂▄▂▆▃▄▃▃▆▅▆▅▁█▂▅▁▂▄▂▁▆▅▅▂
+2026-03-30 21:22:23-07:00 wandb:               pi/alpha_final ▁
+2026-03-30 21:22:23-07:00 wandb:                     pi/error ▃▁▄▃▂▅▁▅▅▆▂▃▄▃▃▂▃▃▅▄▃▄█▅▆▁▄▅▁▂▁▅▆▅▄▁▄▆▂▇
+2026-03-30 21:22:23-07:00 wandb:             pi/integral_term ▁▁▁▁▂▂▂▂▂▂▃▃▃▃▄▄▅▅▅▅▅▆▆▆▆▆▆▆▆▇▇▇▇▇▇▇▇███
+2026-03-30 21:22:23-07:00 wandb:         pi/proportional_term ▄▁▅▃▄▂▃▃▃▃▆▂▆▃▇▂▂▃▂▆▃▃▂▆▅▄█▁▃▅▄▄▁▁▃▅▅▅▄▆
+2026-03-30 21:22:23-07:00 wandb: pruning/actual_deletion_rate ▁▁▁▁▁▆▇▅█▅▇▅▇▅▄▆▆▆▄▄▅▆▄▆▅▃▅▇▆▅▄▇▅▅▅▆▅▅▄█
+2026-03-30 21:22:23-07:00 wandb:            pruning/gate_mean ▇████▃▂▁▂▃▅▃▂▂▃▂▄▂▂▂▅▁▃▃▃▃▄▄▃▁▃▁▄▃▄▄▃▃▃▄
+2026-03-30 21:22:23-07:00 wandb:             pruning/gate_std ▃▂▁▁▁▁▁▁██▇█▇█▇█████▆██▇▇▇▇█▇▇▇▇▇▇█▇▇▇██
+2026-03-30 21:22:23-07:00 wandb:                          +17 ...
+2026-03-30 21:22:23-07:00 wandb: 
+2026-03-30 21:22:23-07:00 wandb: Run summary:
+2026-03-30 21:22:23-07:00 wandb:                 duration_sec 1310.2
+2026-03-30 21:22:23-07:00 wandb:                        epoch 3
+2026-03-30 21:22:23-07:00 wandb:                     pi/alpha 0.02235
+2026-03-30 21:22:23-07:00 wandb:               pi/alpha_final 0.02235
+2026-03-30 21:22:23-07:00 wandb:                     pi/error 0.1267
+2026-03-30 21:22:23-07:00 wandb:             pi/integral_term 154.25874
+2026-03-30 21:22:23-07:00 wandb:         pi/proportional_term 0.04161
+2026-03-30 21:22:23-07:00 wandb: pruning/actual_deletion_rate 0.2434
+2026-03-30 21:22:23-07:00 wandb:            pruning/gate_mean -9.3948
+2026-03-30 21:22:23-07:00 wandb:             pruning/gate_std 11.0866
+2026-03-30 21:22:23-07:00 wandb:                          +17 ...
+2026-03-30 21:22:23-07:00 wandb: 
+2026-03-30 21:22:23-07:00 wandb: 🚀 View run tydiqa-with-blend-l3-30pct at: https://wandb.ai/huihuijiang0619-/mrbert-tydiqa/runs/ymcmbmsw
+2026-03-30 21:22:23-07:00 wandb: ⭐️ View project at: https://wandb.ai/huihuijiang0619-/mrbert-tydiqa
+2026-03-30 21:22:23-07:00 wandb: Synced 5 W&B file(s), 0 media file(s), 0 artifact file(s) and 0 other file(s)
+2026-03-30 21:22:23-07:00 wandb: Find logs at: ./wandb/run-20260331_040031-ymcmbmsw/logs
+2026-03-30 21:22:23-07:00   step 100/7200 loss: 3.4007
+2026-03-30 21:22:23-07:00   step 200/7200 loss: 3.0927
+2026-03-30 21:22:23-07:00   step 300/7200 loss: 2.6747
+2026-03-30 21:22:23-07:00   step 400/7200 loss: 3.1665
+2026-03-30 21:22:23-07:00   step 500/7200 loss: 2.7236
+2026-03-30 21:22:23-07:00   step 600/7200 loss: 2.9155
+2026-03-30 21:22:23-07:00   step 700/7200 loss: 2.8269
+2026-03-30 21:22:23-07:00   step 800/7200 loss: 1.7935
+2026-03-30 21:22:23-07:00   step 900/7200 loss: 2.4329
+2026-03-30 21:22:23-07:00   Gate warm-up done at step 1000; enabling gate regularizer (alpha=1.00e-04)
+2026-03-30 21:22:23-07:00   step 1000/7200 loss: 2.5028
+2026-03-30 21:22:23-07:00   step 1100/7200 loss: 1.9235
+2026-03-30 21:22:23-07:00   step 1200/7200 loss: 1.7995
+2026-03-30 21:22:23-07:00   step 1300/7200 loss: 2.3258
+2026-03-30 21:22:23-07:00   step 1400/7200 loss: 2.1557
+2026-03-30 21:22:23-07:00   step 1500/7200 loss: 2.3188
+2026-03-30 21:22:23-07:00   step 1600/7200 loss: 2.4950
+2026-03-30 21:22:23-07:00   step 1700/7200 loss: 1.6049
+2026-03-30 21:22:23-07:00   step 1800/7200 loss: 2.0122
+2026-03-30 21:22:23-07:00   step 1900/7200 loss: 2.3170
+2026-03-30 21:22:23-07:00   step 2000/7200 loss: 1.9010
+2026-03-30 21:22:23-07:00   step 2100/7200 loss: 2.0353
+2026-03-30 21:22:23-07:00   step 2200/7200 loss: 2.8412
+2026-03-30 21:22:23-07:00   step 2300/7200 loss: 3.1942
+2026-03-30 21:22:23-07:00   step 2400/7200 loss: 3.1384
+2026-03-30 21:22:23-07:00 Epoch 1/3 avg train loss: 2.5937
+2026-03-30 21:22:23-07:00   Validation: 0.2944 (EM)
+2026-03-30 21:22:23-07:00   step 2500/7200 loss: 1.4087
+2026-03-30 21:22:23-07:00   step 2600/7200 loss: 1.0673
+2026-03-30 21:22:23-07:00   step 2700/7200 loss: 2.0624
+2026-03-30 21:22:23-07:00   step 2800/7200 loss: 1.1984
+2026-03-30 21:22:23-07:00   step 2900/7200 loss: 1.6755
+2026-03-30 21:22:23-07:00   step 3000/7200 loss: 1.4541
+2026-03-30 21:22:23-07:00   step 3100/7200 loss: 2.7499
+2026-03-30 21:22:23-07:00   step 3200/7200 loss: 1.2919
+2026-03-30 21:22:23-07:00   step 3300/7200 loss: 1.7622
+2026-03-30 21:22:23-07:00   step 3400/7200 loss: 1.6175
+2026-03-30 21:22:23-07:00   step 3500/7200 loss: 1.7898
+2026-03-30 21:22:23-07:00   step 3600/7200 loss: 1.4072
+2026-03-30 21:22:23-07:00   step 3700/7200 loss: 1.4051
+2026-03-30 21:22:23-07:00   step 3800/7200 loss: 1.8575
+2026-03-30 21:22:23-07:00   step 3900/7200 loss: 2.1650
+2026-03-30 21:22:23-07:00   step 4000/7200 loss: 2.0956
+2026-03-30 21:22:23-07:00   step 4100/7200 loss: 1.3515
+2026-03-30 21:22:23-07:00   step 4200/7200 loss: 1.6019
+2026-03-30 21:22:23-07:00   step 4300/7200 loss: 1.6721
+2026-03-30 21:22:23-07:00   step 4400/7200 loss: 1.8017
+2026-03-30 21:22:23-07:00   step 4500/7200 loss: 2.6270
+2026-03-30 21:22:23-07:00   step 4600/7200 loss: 2.0152
+2026-03-30 21:22:23-07:00   step 4700/7200 loss: 2.9604
+2026-03-30 21:22:23-07:00   step 4800/7200 loss: 3.1594
+2026-03-30 21:22:23-07:00 Epoch 2/3 avg train loss: 1.7927
+2026-03-30 21:22:23-07:00   Validation: 0.3632 (EM)
+2026-03-30 21:22:23-07:00   step 4900/7200 loss: 1.1700
+2026-03-30 21:22:23-07:00   step 5000/7200 loss: 1.0857
+2026-03-30 21:22:23-07:00   step 5100/7200 loss: 1.3379
+2026-03-30 21:22:23-07:00   step 5200/7200 loss: 1.1485
+2026-03-30 21:22:23-07:00   step 5300/7200 loss: 0.9453
+2026-03-30 21:22:23-07:00   step 5400/7200 loss: 0.6663
+2026-03-30 21:22:23-07:00   step 5500/7200 loss: 1.3424
+2026-03-30 21:22:23-07:00   step 5600/7200 loss: 1.3578
+2026-03-30 21:22:23-07:00   step 5700/7200 loss: 1.9654
+2026-03-30 21:22:23-07:00   step 5800/7200 loss: 1.2023
+2026-03-30 21:22:23-07:00   step 5900/7200 loss: 1.1556
+2026-03-30 21:22:23-07:00   step 6000/7200 loss: 0.9903
+2026-03-30 21:22:23-07:00   step 6100/7200 loss: 1.7654
+2026-03-30 21:22:23-07:00   step 6200/7200 loss: 1.2883
+2026-03-30 21:22:23-07:00   step 6300/7200 loss: 1.1405
+2026-03-30 21:22:23-07:00   step 6400/7200 loss: 1.2985
+2026-03-30 21:22:23-07:00   step 6500/7200 loss: 1.2673
+2026-03-30 21:22:23-07:00   step 6600/7200 loss: 0.8881
+2026-03-30 21:22:23-07:00   step 6700/7200 loss: 1.0620
+2026-03-30 21:22:23-07:00   step 6800/7200 loss: 1.0989
+2026-03-30 21:22:23-07:00   step 6900/7200 loss: 1.3873
+2026-03-30 21:22:23-07:00   step 7000/7200 loss: 1.1834
+2026-03-30 21:22:23-07:00   step 7100/7200 loss: 1.4405
+2026-03-30 21:22:23-07:00   step 7200/7200 loss: 2.2737
+2026-03-30 21:22:23-07:00 Epoch 3/3 avg train loss: 1.4239
+2026-03-30 21:22:23-07:00   Validation: 0.3499 (EM)
+2026-03-30 21:22:23-07:00 Validation exact match: 0.3499 (1394/3984)
+2026-03-30 21:22:23-07:00 Inference: 52.51 ms/batch  |  304.7 samples/sec
+2026-03-30 21:22:23-07:00 Actual deletion rate (train): 24.34%  |  gate mean: -9.3948  std: 11.0866  |  alpha_final: 0.022346  |  time: 1310.2s
+2026-03-30 21:22:23-07:00 Done.
+

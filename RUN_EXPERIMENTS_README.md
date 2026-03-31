@@ -88,3 +88,43 @@ python3 train_mrbert.py --dataset tydiqa --epochs 1 --batch_size 8 --max_length 
 ```
 
 Then run `python3 scripts/aggregate_results.py` again to update RESULTS.md.
+
+---
+
+## 6. Modal A100 TyDi QA (`modal_logs/`)
+
+These files are **local copies** of Modal App stdout (not `scp` from a VM). Download with:
+
+`modal app logs <APP_ID> --timestamps > modal_logs/<name>.log`
+
+Full parameter snapshots appear in new runs as **`[Training args]`** after `Device:` (see `train_mrbert.py`).
+
+| Local log file | Modal App ID | Final validation EM | Train del% (logged) | Intended launcher flags |
+|----------------|--------------|----------------------|----------------------|-------------------------|
+| `modal_logs/tydiqa_modal_EM03471_ap-4FzTHi10GW6ipDKX7fZ9TC.log` | `ap-4FzTHi10GW6ipDKX7fZ9TC` | **0.3471** | ~25.28% | `run_mrbert_tydi_modal.py` + `--no-use-pre-deletion-blend` + shared hyperparameters below |
+| `modal_logs/tydiqa_modal_EM03778_ap-IEe2gcBxFgDvH62acNX22v.log` | `ap-IEe2gcBxFgDvH62acNX22v` | **0.3778** | ~25.90% | Same + `--use-pre-deletion-blend` (**~+3.1 pp** vs row above; W&B run name may not match—trust App ID + `[Training args]`) |
+| `modal_logs/tydiqa_modal_EM03499_ap-rqoNveoPynOFoc2iKRSCnA.log` | `ap-rqoNveoPynOFoc2iKRSCnA` | **0.3499** | ~24.34% | Overlapping TyDi job from the same experiment batch; use logs / W&B for exact config |
+
+**Shared hyperparameters** (both primary runs): `--batch-size 16 --epochs 3 --max-length 256 --lr 2e-5 --target-deletion 0.3 --gate-layer-index 3 --gate-threshold-ratio 0.5 --gate-warmup-steps 1000 --use-pi --controller-kp 0.5 --controller-ki 1e-5` and `--wandb-project mrbert-tydiqa` with distinct `--wandb-run-name` values.
+
+**Example commands** (from repo root):
+
+```bash
+# A: with pre-deletion blending
+modal run --detach run_mrbert_tydi_modal.py \
+  --use-pre-deletion-blend \
+  --wandb-project mrbert-tydiqa --wandb-run-name tydiqa-with-blend-l3-30pct \
+  --batch-size 16 --epochs 3 --max-length 256 --lr 2e-5 \
+  --target-deletion 0.3 --gate-layer-index 3 --gate-threshold-ratio 0.5 \
+  --gate-warmup-steps 1000 --use-pi --controller-kp 0.5 --controller-ki 1e-5
+
+# B: without blending
+modal run --detach run_mrbert_tydi_modal.py \
+  --no-use-pre-deletion-blend \
+  --wandb-project mrbert-tydiqa --wandb-run-name tydiqa-no-blend-l3-30pct \
+  --batch-size 16 --epochs 3 --max-length 256 --lr 2e-5 \
+  --target-deletion 0.3 --gate-layer-index 3 --gate-threshold-ratio 0.5 \
+  --gate-warmup-steps 1000 --use-pi --controller-kp 0.5 --controller-ki 1e-5
+```
+
+See **`report/final_report/presentation.md`** §4.4.4 for analysis and interpretation.

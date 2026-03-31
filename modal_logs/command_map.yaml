@@ -1,0 +1,73 @@
+generated_at: "2026-03-31"
+project: "cs224n_project"
+launcher: "run_mrbert_tydi_modal.py"
+shared_args:
+  dataset: "tydiqa"
+  backbone: "bert"
+  epochs: 3
+  batch_size: 16
+  max_length: 256
+  lr: 2e-5
+  target_deletion: 0.3
+  gate_layer_index: 3
+  gate_threshold_ratio: 0.5
+  gate_warmup_steps: 1000
+  use_pi: true
+  controller_kp: 0.5
+  controller_ki: 1e-5
+  wandb_project: "mrbert-tydiqa"
+
+runs:
+  - log_file: "modal_logs/tydiqa_modal_EM03499_ap-rqoNveoPynOFoc2iKRSCnA.log"
+    app_id: "ap-rqoNveoPynOFoc2iKRSCnA"
+    final_val_em: 0.3499
+    train_deletion_rate: 0.2434
+    inferred_command: |
+      modal run --detach run_mrbert_tydi_modal.py \
+        --use-pre-deletion-blend \
+        --wandb-project mrbert-tydiqa \
+        --wandb-run-name tydiqa-with-blend-l3-30pct \
+        --batch-size 16 --epochs 3 --max-length 256 --lr 2e-5 \
+        --target-deletion 0.3 --gate-layer-index 3 --gate-threshold-ratio 0.5 \
+        --gate-warmup-steps 1000 --use-pi --controller-kp 0.5 --controller-ki 1e-5
+    evidence:
+      - "terminal/9 shows ap-rqoN created right after terminal A command"
+      - "log wandb run name is tydiqa-with-blend-l3-30pct"
+    confidence: "high"
+
+  - log_file: "modal_logs/tydiqa_modal_EM03471_ap-4FzTHi10GW6ipDKX7fZ9TC.log"
+    app_id: "ap-4FzTHi10GW6ipDKX7fZ9TC"
+    final_val_em: 0.3471
+    train_deletion_rate: 0.2528
+    inferred_command: |
+      modal run --detach run_mrbert_tydi_modal.py \
+        --no-use-pre-deletion-blend \
+        --wandb-project mrbert-tydiqa \
+        --wandb-run-name tydiqa-no-blend-l3-30pct \
+        --batch-size 16 --epochs 3 --max-length 256 --lr 2e-5 \
+        --target-deletion 0.3 --gate-layer-index 3 --gate-threshold-ratio 0.5 \
+        --gate-warmup-steps 1000 --use-pi --controller-kp 0.5 --controller-ki 1e-5
+    evidence:
+      - "terminal/9 shows ap-4FzT created after terminal B command"
+      - "log wandb run name is tydiqa-no-blend-l3-30pct"
+    confidence: "high"
+
+  - log_file: "modal_logs/tydiqa_modal_EM03778_ap-IEe2gcBxFgDvH62acNX22v.log"
+    app_id: "ap-IEe2gcBxFgDvH62acNX22v"
+    final_val_em: 0.3778
+    train_deletion_rate: 0.2590
+    inferred_command: |
+      modal run --detach run_mrbert_tydi_modal.py \
+        --no-use-pre-deletion-blend \
+        --wandb-project mrbert-tydiqa \
+        --wandb-run-name tydiqa-no-blend-l3-30pct \
+        --batch-size 16 --epochs 3 --max-length 256 --lr 2e-5 \
+        --target-deletion 0.3 --gate-layer-index 3 --gate-threshold-ratio 0.5 \
+        --gate-warmup-steps 1000 --use-pi --controller-kp 0.5 --controller-ki 1e-5
+    evidence:
+      - "this log's wandb run name is tydiqa-no-blend-l3-30pct (run id 5vjo5ngm)"
+      - "not one of the two explicit submissions in terminal/9 block"
+    confidence: "medium"
+    notes:
+      - "historical mismatch exists between file naming and wandb run names"
+      - "for future runs, use [Training args] line in stdout (recently added) as source of truth"

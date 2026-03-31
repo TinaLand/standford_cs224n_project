@@ -22,6 +22,17 @@ from mrbert import MrBertForSequenceClassification, MrBertForQuestionAnswering, 
 from mrbert.pi_controller import PIController
 
 
+def _args_as_dict(args: argparse.Namespace) -> dict:
+    """JSON-/W&B-friendly snapshot of CLI args (Modal logs + wandb config)."""
+    out = {}
+    for key, val in sorted(vars(args).items()):
+        if val is None or isinstance(val, (bool, int, float, str)):
+            out[key] = val
+        else:
+            out[key] = str(val)
+    return out
+
+
 def _get_gpu_system_metrics():
     """Query nvidia-smi for ECC errors and memory clock; return dict for wandb (or empty dict on failure)."""
     out = {}
@@ -373,6 +384,7 @@ def main():
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     print(f"Device: {device}")
+    print("[Training args]\n" + json.dumps(_args_as_dict(args), indent=2))
 
     use_wandb = False
     if args.use_wandb:
@@ -445,21 +457,11 @@ def main():
     gate_regularizer_weight = args.gate_weight
 
     if use_wandb:
+        wandb_cfg = _args_as_dict(args)
+        wandb_cfg["task_type"] = task_type
         wandb.init(
             project=args.wandb_project,
-            config={
-                "dataset": args.dataset,
-                "epochs": args.epochs,
-                "batch_size": args.batch_size,
-                "lr": args.lr,
-                "gate_weight": args.gate_weight,
-                "use_pi": args.use_pi,
-                "target_deletion": args.target_deletion,
-                "max_length": args.max_length,
-                "task_type": task_type,
-                "max_train_samples": args.max_train_samples,
-                "gate_warmup_steps": args.gate_warmup_steps,
-            },
+            config=wandb_cfg,
             name=args.wandb_run_name or f"{args.dataset}_{'mrbert' if (args.gate_weight != 0 or args.use_pi) else 'baseline'}",
         )
         # Define x-axis for cleaner charts: train/pruning/pi vs step, val vs step (after each epoch)
