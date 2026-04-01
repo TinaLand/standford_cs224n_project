@@ -18,6 +18,32 @@ shared_args:
   wandb_project: "mrbert-tydiqa"
 
 runs:
+  - log_file: "modal_logs/tydiqa_modal_EM03861_ap-Qyiv6SzrZ7T2OgtJwL7LWl.log"
+    app_id: "ap-Qyiv6SzrZ7T2OgtJwL7LWl"
+    final_val_em: 0.3861
+    peak_val_em: 0.4000
+    peak_val_epoch: 5
+    train_deletion_rate_logged: 0.4799
+    alpha_final: 0.0
+    wandb_entity: "aronima7-stanford-university"
+    wandb_project: "alina"
+    wandb_run_name: "tydiqa-l9-m384-ep6-gt08-pifix-20260331"
+    inferred_command: |
+      modal run --detach run_mrbert_tydi_modal.py \
+        --dataset tydiqa --backbone bert \
+        --gate-layer-index 9 --max-length 384 --epochs 6 --batch-size 16 --lr 2e-5 \
+        --target-deletion 0.2 --gate-threshold-ratio 0.8 --controller-kp 0.1 --controller-ki 1e-5 \
+        --gate-warmup-steps 1000 --use-pi \
+        --use-pre-deletion-blend --no-use-learnable-pre-deletion-blend \
+        --use-wandb --wandb-entity aronima7-stanford-university --wandb-project alina \
+        --wandb-run-name tydiqa-l9-m384-ep6-gt08-pifix-20260331
+    outcome: "post_fix_success"
+    notes:
+      - "Post-fix rerun after aligning PI/logging deletion thresholds with gate_threshold_ratio."
+      - "Best EM is epoch-5 checkpoint (0.4000); final epoch-6 EM is 0.3861."
+      - "alpha_final=0 means PI removed additional deletion pressure late; deletion can still remain high from task-driven gate dynamics."
+    confidence: "high"
+
   - log_file: "modal_logs/tydiqa_modal_ap-c5H2JBykE62ASkj1prfX7M.log"
     app_id: "ap-c5H2JBykE62ASkj1prfX7M"
     final_val_em: 0.0887
