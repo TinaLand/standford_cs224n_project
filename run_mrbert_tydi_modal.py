@@ -60,6 +60,7 @@ def run_training(
     pre_deletion_blend_init_scale: float | None = None,
     use_wandb: bool = True,
     wandb_project: str = "mrbert-tydiqa",
+    wandb_entity: str | None = None,
     wandb_run_name: str = "tydiqa-with-blend-l3-30pct",
 ) -> str:
     env = os.environ.copy()
@@ -112,6 +113,8 @@ def run_training(
         cmd.extend(["--pre_deletion_blend_init_scale", str(pre_deletion_blend_init_scale)])
     if use_wandb:
         cmd.extend(["--use_wandb", "--wandb_project", wandb_project, "--wandb_run_name", wandb_run_name])
+        if wandb_entity:
+            cmd.extend(["--wandb_entity", wandb_entity])
 
     ret = subprocess.run(cmd, env=env)
     if os.path.isdir("/workspace/results"):
@@ -143,6 +146,7 @@ def main(
     pre_deletion_blend_init_scale: float | None = None,
     use_wandb: bool = True,
     wandb_project: str = "mrbert-tydiqa",
+    wandb_entity: str | None = None,
     wandb_run_name: str = "tydiqa-with-blend-l3-30pct",
 ):
     print("Submitting MrBERT TyDi run on Modal A100...")
@@ -165,6 +169,7 @@ def main(
         pre_deletion_blend_init_scale=pre_deletion_blend_init_scale,
         use_wandb=use_wandb,
         wandb_project=wandb_project,
+        wandb_entity=wandb_entity,
         wandb_run_name=wandb_run_name,
     )
     print("Submitted. Check Modal dashboard logs for progress.")

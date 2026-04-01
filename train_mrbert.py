@@ -344,6 +344,12 @@ def main():
                         help="0=none, 1=params+loss_ce/loss_gate, 2=+PI state, 3=+dropped-token summary after val")
     parser.add_argument("--use_wandb", action="store_true", help="Log metrics to Weights & Biases (wandb)")
     parser.add_argument("--wandb_project", type=str, default="mrbert", help="WandB project name")
+    parser.add_argument(
+        "--wandb_entity",
+        type=str,
+        default=None,
+        help="WandB entity (team or username). URL is wandb.ai/<entity>/<project>. Omit to use the API key's default entity.",
+    )
     parser.add_argument("--wandb_run_name", type=str, default=None, help="WandB run name (default: dataset + model type)")
     args = parser.parse_args()
 
@@ -475,11 +481,14 @@ def main():
     if use_wandb:
         wandb_cfg = _args_as_dict(args)
         wandb_cfg["task_type"] = task_type
-        wandb.init(
+        init_kw = dict(
             project=args.wandb_project,
             config=wandb_cfg,
             name=args.wandb_run_name or f"{args.dataset}_{'mrbert' if (args.gate_weight != 0 or args.use_pi) else 'baseline'}",
         )
+        if args.wandb_entity:
+            init_kw["entity"] = args.wandb_entity
+        wandb.init(**init_kw)
         # Define x-axis for cleaner charts: train/pruning/pi vs step, val vs step (after each epoch)
         wandb.define_metric("step")
         wandb.define_metric("train/*", step_metric="step")
