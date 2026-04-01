@@ -50,7 +50,7 @@ def main():
         loss.backward()
         optimizer.step()
         if out.get("gate") is not None:
-            gate_regularizer_weight = pi.step(out["gate"], gate_k=-30.0)
+            gate_regularizer_weight = pi.step(out["gate"], gate_k=-30.0, gate_threshold_ratio=0.5)
         print(f"Step {step + 1} loss: {loss.item():.4f}")
 
     # Eval: hard deletion (faster)

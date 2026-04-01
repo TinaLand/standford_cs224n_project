@@ -2,6 +2,7 @@
 PI controller for targeting a specific deletion ratio (paper Section 3.2, Eq.(4)-(6)).
 Updates alpha each step: P term (EMA of error), I term (integral of error),
 alpha = max(0, kp * P + ki * I), so deletion ratio tracks target_deletion_ratio.
+Deletion ratio uses the same gate threshold as hard deletion: gate < gate_k * gate_threshold_ratio.
 """
 import torch
 
@@ -17,11 +18,18 @@ class PIController:
         self.p = 0.0
         self.i = 0.0
 
-    def step(self, gate: torch.Tensor, gate_k: float = -30.0, return_state: bool = False):
+    def step(
+        self,
+        gate: torch.Tensor,
+        gate_k: float = -30.0,
+        gate_threshold_ratio: float = 0.5,
+        return_state: bool = False,
+    ):
         """Update alpha from current batch gate. gate shape: (batch, seq_len), values in [gate_k, 0].
+        gate_threshold_ratio must match hard-deletion threshold in the model (gate_k * ratio).
         If return_state=True, returns (alpha, dict with error, p, i, current_ratio). Otherwise returns alpha."""
         with torch.no_grad():
-            threshold = gate_k * 0.5  # paper: k/2
+            threshold = gate_k * gate_threshold_ratio
             deleted = (gate < threshold).float()
             current_ratio = deleted.mean().item()
             current_ratio = max(0.0, min(1.0, current_ratio))

@@ -496,7 +496,8 @@ def main():
     _pi_warned_500 = False
 
     # Tracking: deletion rate, gate stats, time (baseline has no gate)
-    gate_k, threshold_ratio = -30.0, 0.5
+    gate_k = -30.0
+    threshold_ratio = args.gate_threshold_ratio
     threshold = gate_k * threshold_ratio
     n_gate_batches = 0
     sum_del_rate = 0.0
@@ -570,7 +571,12 @@ def main():
             pi_state = None
             # Update PI only after gate warm-up (so alpha is not driven up during warm-up)
             if pi is not None and out.get("gate") is not None and (args.gate_warmup_steps <= 0 or step > args.gate_warmup_steps):
-                res = pi.step(out["gate"], gate_k=gate_k, return_state=(args.log_level >= 2 or use_wandb))
+                res = pi.step(
+                    out["gate"],
+                    gate_k=gate_k,
+                    gate_threshold_ratio=args.gate_threshold_ratio,
+                    return_state=(args.log_level >= 2 or use_wandb),
+                )
                 if isinstance(res, tuple):
                     gate_regularizer_weight, pi_state = res
                 else:

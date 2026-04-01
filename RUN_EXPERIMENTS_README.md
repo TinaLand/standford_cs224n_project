@@ -97,6 +97,25 @@ These files are **local copies** of Modal App stdout (not `scp` from a VM). Down
 
 `modal app logs <APP_ID> --timestamps > modal_logs/<name>.log`
 
+**If the saved file is empty or missing training lines:** Some Modal CLI versions only return a **bounded** log window (older docs mentioned the last 100 lines). Try:
+
+```bash
+# Works on all recent CLIs (from repo root):
+modal app logs ap-XXXXXXXX --timestamps > modal_logs/my_run.log
+
+# If your `modal app logs -h` lists --tail / --since, use them for long runs:
+# modal app logs ap-XXXXXXXX --timestamps --tail 20000 > modal_logs/my_run.log
+
+# Wrong Modal environment shows no apps / empty logs — match the dashboard:
+modal app list --json
+modal app logs ap-XXXXXXXX -e main --timestamps
+
+# Open the same page as the browser (then copy-paste if CLI still fails)
+modal app dashboard ap-XXXXXXXX
+```
+
+**PI vs `--gate-threshold-ratio` (important):** Through 2026-03-31, `PIController` and the train-loop “deletion %” used a **fixed `gate_k * 0.5`** while the model’s hard-delete threshold followed **`--gate-threshold-ratio`**. Using e.g. `0.8` made PI think deletion was far above `target_deletion`, pushed **α → 0**, and produced misleading logged del%. **This is fixed** in `mrbert/pi_controller.py` + `train_mrbert.py` (PI and logs now use `args.gate_threshold_ratio`). Re-run any experiment that mixed non-0.5 ratios with PI after pulling the fix.
+
 Full parameter snapshots appear in new runs as **`[Training args]`** after `Device:` (see `train_mrbert.py`).
 
 | Local log file | Modal App ID | Final validation EM | Train del% (logged) | Intended launcher flags |
@@ -104,6 +123,7 @@ Full parameter snapshots appear in new runs as **`[Training args]`** after `Devi
 | `modal_logs/tydiqa_modal_EM03471_ap-4FzTHi10GW6ipDKX7fZ9TC.log` | `ap-4FzTHi10GW6ipDKX7fZ9TC` | **0.3471** | ~25.28% | `run_mrbert_tydi_modal.py` + `--no-use-pre-deletion-blend` + shared hyperparameters below |
 | `modal_logs/tydiqa_modal_EM03778_ap-IEe2gcBxFgDvH62acNX22v.log` | `ap-IEe2gcBxFgDvH62acNX22v` | **0.3778** | ~25.90% | Same + `--use-pre-deletion-blend` (**~+3.1 pp** vs row above; W&B run name may not match—trust App ID + `[Training args]`) |
 | `modal_logs/tydiqa_modal_EM03499_ap-rqoNveoPynOFoc2iKRSCnA.log` | `ap-rqoNveoPynOFoc2iKRSCnA` | **0.3499** | ~24.34% | Overlapping TyDi job from the same experiment batch; use logs / W&B for exact config |
+| `modal_logs/tydiqa_modal_ap-c5H2JBykE62ASkj1prfX7M.log` | `ap-c5H2JBykE62ASkj1prfX7M` | **0.0887** (peak **0.1312** ep 5) | ~88.75% **(misleading; see below)** | “Limit” run: L9, `max_length` 384, 6 ep, fixed blend, `target_deletion` 0.2, `gate_threshold_ratio` **0.8**, `controller_kp` 0.1. **Failed** mainly because PI + logged del% used **k/2** while hard-delete used **0.8·k**—α collapsed to 0. **Fixed in code** (PI/logs now follow `gate_threshold_ratio`); treat this log as invalid for comparing L9 vs L3 until re-run. W&B: `tydiqa-lim-l9-m384-ep6-t020-gt08-kp01-fixedblend`. |
 
 **Shared hyperparameters** (both primary runs): `--batch-size 16 --epochs 3 --max-length 256 --lr 2e-5 --target-deletion 0.3 --gate-layer-index 3 --gate-threshold-ratio 0.5 --gate-warmup-steps 1000 --use-pi --controller-kp 0.5 --controller-ki 1e-5` and `--wandb-project mrbert-tydiqa` with distinct `--wandb-run-name` values.
 

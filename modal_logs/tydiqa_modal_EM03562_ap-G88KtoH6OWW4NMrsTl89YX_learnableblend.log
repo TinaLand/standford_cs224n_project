@@ -1,0 +1,202 @@
+Mar 30  22:25:11.886
+Warning: You are sending unauthenticated requests to the HF Hub. Please set a HF_TOKEN to enable higher rate limits and faster downloads.
+Mar 30  22:25:15.747
+Device: cuda
+[Training args]
+{
+  "backbone": "bert",
+  "batch_size": 16,
+  "controller_ki": 1e-05,
+  "controller_kp": 0.5,
+  "dataset": "tydiqa",
+  "epochs": 3,
+  "gate_layer_index": 3,
+  "gate_threshold_ratio": 0.5,
+  "gate_warmup_steps": 1000,
+  "gate_weight": 0.0001,
+  "log_deletion_trace": null,
+  "log_level": 0,
+  "lr": 2e-05,
+  "max_length": 256,
+  "max_train_samples": null,
+  "output_result": null,
+  "phase1_gate_weight": 0.001,
+  "phase1_steps": 0,
+  "pre_deletion_blend_init_scale": 30.0,
+  "target_deletion": 0.3,
+  "use_learnable_pre_deletion_blend": true,
+  "use_pi": true,
+  "use_pre_deletion_blend": true,
+  "use_wandb": true,
+  "wandb_project": "mrbert-tydiqa",
+  "wandb_run_name": "tydiqa-learnableblend-l3-30pct"
+}
+Loading dataset: tydiqa (backbone=bert)
+Mar 30  22:25:15.951
+Generating train split: 100%|██████████| 49881/49881 [00:00<00:00, 246421.25 examples/s]
+Mar 30  22:25:15.975
+Generating validation split: 100%|██████████| 5077/5077 [00:00<00:00, 222422.23 examples/s]
+Mar 30  22:26:32.501
+Loading weights: 100%|██████████| 197/197 [00:00<00:00, 2400.63it/s]
+Mar 30  22:26:32.535
+BertForQuestionAnswering LOAD REPORT from: bert-base-uncased
+Key                                        | Status     | 
+-------------------------------------------+------------+-
+cls.predictions.bias                       | UNEXPECTED | 
+cls.predictions.transform.LayerNorm.bias   | UNEXPECTED | 
+bert.pooler.dense.bias                     | UNEXPECTED | 
+bert.pooler.dense.weight                   | UNEXPECTED | 
+cls.predictions.transform.dense.bias       | UNEXPECTED | 
+cls.seq_relationship.bias                  | UNEXPECTED | 
+cls.seq_relationship.weight                | UNEXPECTED | 
+cls.predictions.transform.dense.weight     | UNEXPECTED | 
+cls.predictions.transform.LayerNorm.weight | UNEXPECTED | 
+qa_outputs.weight                          | MISSING    | 
+qa_outputs.bias                            | MISSING    | 
+
+Notes:
+- UNEXPECTED:	can be ignored when loading from different task/architecture; not ok if you expect identical arch.
+- MISSING:	those params were newly initialized because missing from the checkpoint. Consider training on your downstream task.
+Mar 30  22:26:37.291
+wandb: [wandb.login()] Loaded credentials for https://api.wandb.ai from WANDB_API_KEY.
+Mar 30  22:26:37.936
+wandb: Currently logged in as: huihuijiang0619 (huihuijiang0619-) to https://api.wandb.ai. Use `wandb login --relogin` to force relogin
+Mar 30  22:26:39.091
+wandb: setting up run p9vbypxc
+Mar 30  22:26:39.483
+wandb: Tracking run with wandb version 0.25.1
+Mar 30  22:26:39.483
+wandb: Run data is saved locally in /workspace/wandb/run-20260331_052637-p9vbypxc
+wandb: Run `wandb offline` to turn off syncing.
+Mar 30  22:26:39.483
+wandb: Syncing run tydiqa-learnableblend-l3-30pct
+Mar 30  22:26:39.483
+wandb: ⭐️ View project at https://wandb.ai/huihuijiang0619-/mrbert-tydiqa
+Mar 30  22:26:39.484
+wandb: 🚀 View run at https://wandb.ai/huihuijiang0619-/mrbert-tydiqa/runs/p9vbypxc
+Mar 30  22:26:39.607
+`use_return_dict` is deprecated! Use `return_dict` instead!
+Mar 30  22:49:25.715
+wandb: updating run metadata
+Mar 30  22:49:26.119
+wandb: uploading output.log; uploading wandb-summary.json; uploading config.yaml
+Mar 30  22:49:26.625
+wandb: uploading output.log; uploading wandb-summary.json
+Mar 30  22:49:26.906
+wandb: 
+wandb: Run history:
+wandb:                 duration_sec ▁
+wandb:                        epoch ▁▅█
+wandb:                     pi/alpha ▃▄▆▃▅▃▁▂▃▁▄▁▄▅▄▂▃▇▃▂▄▄▁▂▁▆▄█▆▂▂▇▁▃▂▁▃▂▂▁
+wandb:               pi/alpha_final ▁
+wandb:                     pi/error ▄▅▅▄▅▄▁▅▄▅▆▅▄█▅▃▆▆▅▃▄▇▅█▄▅▆▅▅▆▃█▁▆▄▄▄▇▇▄
+wandb:             pi/integral_term ▁▁▁▁▂▂▂▃▃▃▃▃▃▄▄▅▅▅▅▅▅▅▆▆▆▆▆▆▇▇▇▇▇▇▇█████
+wandb:         pi/proportional_term ▅▆▇▅▅▅▃▅▅▄▄▆▆▆▇▅▇█▇▅▇▅▆▆▅▄▄▆▇▇▄▅█▅▆▅▁▅▄▄
+wandb: pruning/actual_deletion_rate █▃▅▂▃▃▃▄▃▄▆▃▃▂▃▃▃▃▄▃▃▆▁▃▄▃▅▃▃▁▃▂▂▄▂▃▃▁▇▃
+wandb:            pruning/gate_mean ▂▅▇▆▇█▄▄▅▂▄▅▄▅▄▃▄▄▄▃▁▃▆▃▆▃▄▂▅▄▄▆▅▆▁▃▄▆▆▄
+wandb:             pruning/gate_std ▁▄▂▂▁▆▇▆▃▇█▇▆▇▄▇▇▇▆▆▅▆▇▆▇▆▆▅▆▆▇▅█▆▇▇▆▅█▆
+wandb:                          +17 ...
+wandb: 
+wandb: Run summary:
+wandb:                 duration_sec 1366
+wandb:                        epoch 3
+wandb:                     pi/alpha 0.00188
+wandb:               pi/alpha_final 0.00188
+wandb:                     pi/error -0.01001
+wandb:             pi/integral_term 110.68905
+wandb:         pi/proportional_term 0.00155
+wandb: pruning/actual_deletion_rate 0.2864
+wandb:            pruning/gate_mean -10.584
+wandb:             pruning/gate_std 11.3311
+wandb:                          +17 ...
+wandb: 
+Mar 30  22:49:26.907
+wandb: 🚀 View run tydiqa-learnableblend-l3-30pct at: https://wandb.ai/huihuijiang0619-/mrbert-tydiqa/runs/p9vbypxc
+wandb: ⭐️ View project at: https://wandb.ai/huihuijiang0619-/mrbert-tydiqa
+wandb: Synced 5 W&B file(s), 0 media file(s), 0 artifact file(s) and 0 other file(s)
+Mar 30  22:49:26.907
+wandb: Find logs at: ./wandb/run-20260331_052637-p9vbypxc/logs
+Mar 30  22:49:26.923
+  step 100/7200 loss: 4.4180
+  step 200/7200 loss: 3.1326
+  step 300/7200 loss: 3.4279
+  step 400/7200 loss: 2.7434
+  step 500/7200 loss: 2.6534
+  step 600/7200 loss: 3.3177
+  step 700/7200 loss: 3.3275
+  step 800/7200 loss: 2.7767
+  step 900/7200 loss: 3.3476
+  Gate warm-up done at step 1000; enabling gate regularizer (alpha=1.00e-04)
+  step 1000/7200 loss: 2.0041
+  step 1100/7200 loss: 1.8509
+  step 1200/7200 loss: 3.3124
+  step 1300/7200 loss: 2.1053
+  step 1400/7200 loss: 1.7417
+  step 1500/7200 loss: 2.3126
+  step 1600/7200 loss: 2.4517
+  step 1700/7200 loss: 3.3570
+  step 1800/7200 loss: 1.7939
+  step 1900/7200 loss: 2.4801
+  step 2000/7200 loss: 1.3564
+  step 2100/7200 loss: 2.8215
+  step 2200/7200 loss: 1.7010
+  step 2300/7200 loss: 1.9490
+  step 2400/7200 loss: 2.0953
+Epoch 1/3 avg train loss: 2.6730
+  Validation: 0.2801 (EM)
+  step 2500/7200 loss: 2.0323
+  step 2600/7200 loss: 2.3677
+  step 2700/7200 loss: 1.6983
+  step 2800/7200 loss: 2.0242
+  step 2900/7200 loss: 1.3500
+  step 3000/7200 loss: 1.7457
+  step 3100/7200 loss: 1.4213
+  step 3200/7200 loss: 1.4535
+  step 3300/7200 loss: 2.0072
+  step 3400/7200 loss: 1.9073
+  step 3500/7200 loss: 1.5882
+  step 3600/7200 loss: 0.4885
+  step 3700/7200 loss: 1.5505
+  step 3800/7200 loss: 1.5146
+  step 3900/7200 loss: 1.4781
+  step 4000/7200 loss: 1.5270
+  step 4100/7200 loss: 1.4260
+  step 4200/7200 loss: 1.7215
+  step 4300/7200 loss: 1.6512
+  step 4400/7200 loss: 2.5780
+  step 4500/7200 loss: 1.6445
+  step 4600/7200 loss: 0.9735
+  step 4700/7200 loss: 1.9031
+  step 4800/7200 loss: 1.6364
+Epoch 2/3 avg train loss: 1.8597
+  Validation: 0.3261 (EM)
+  step 4900/7200 loss: 1.0855
+  step 5000/7200 loss: 1.8343
+  step 5100/7200 loss: 2.4392
+  step 5200/7200 loss: 1.2647
+  step 5300/7200 loss: 1.5147
+  step 5400/7200 loss: 1.6633
+  step 5500/7200 loss: 1.1974
+  step 5600/7200 loss: 1.7686
+  step 5700/7200 loss: 1.9551
+  step 5800/7200 loss: 2.2249
+  step 5900/7200 loss: 1.1431
+  step 6000/7200 loss: 1.1270
+  step 6100/7200 loss: 1.3036
+  step 6200/7200 loss: 1.4186
+  step 6300/7200 loss: 1.1367
+  step 6400/7200 loss: 1.2121
+  step 6500/7200 loss: 2.3781
+  step 6600/7200 loss: 2.5581
+  step 6700/7200 loss: 1.6531
+  step 6800/7200 loss: 1.3107
+  step 6900/7200 loss: 2.5400
+  step 7000/7200 loss: 0.7834
+  step 7100/7200 loss: 1.6910
+  step 7200/7200 loss: 2.0061
+Epoch 3/3 avg train loss: 1.4759
+  Validation: 0.3562 (EM)
+Validation exact match: 0.3562 (1419/3984)
+Inference: 56.27 ms/batch  |  284.36 samples/sec
+Actual deletion rate (train): 28.64%  |  gate mean: -10.584  std: 11.3311  |  alpha_final: 0.001883  |  time: 1366.0s
+Done.

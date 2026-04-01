@@ -1,4 +1,4 @@
-generated_at: "2026-03-31"
+generated_at: "2026-04-01"
 project: "cs224n_project"
 launcher: "run_mrbert_tydi_modal.py"
 shared_args:
@@ -18,6 +18,28 @@ shared_args:
   wandb_project: "mrbert-tydiqa"
 
 runs:
+  - log_file: "modal_logs/tydiqa_modal_ap-c5H2JBykE62ASkj1prfX7M.log"
+    app_id: "ap-c5H2JBykE62ASkj1prfX7M"
+    final_val_em: 0.0887
+    peak_val_em_epoch5: 0.1312
+    train_deletion_rate_logged: 0.8875
+    wandb_run_name: "tydiqa-lim-l9-m384-ep6-t020-gt08-kp01-fixedblend"
+    inferred_command: |
+      modal run --detach run_mrbert_tydi_modal.py \
+        --gate-layer-index 9 --max-length 384 --epochs 6 --batch-size 16 --lr 2e-5 \
+        --target-deletion 0.2 --gate-threshold-ratio 0.8 --controller-kp 0.1 --controller-ki 1e-5 \
+        --gate-warmup-steps 1000 --use-pi \
+        --use-pre-deletion-blend --no-use-learnable-pre-deletion-blend \
+        --wandb-project mrbert-tydiqa --wandb-run-name tydiqa-lim-l9-m384-ep6-t020-gt08-kp01-fixedblend
+    outcome: "failed_run"
+    root_cause:
+      - "PIController and train loop used fixed k/2 for deletion-rate feedback while hard-delete used gate_threshold_ratio=0.8; PI saw ~90% 'deletion' vs target 0.2, drove alpha to 0."
+      - "Repo fix (2026-04-01): pi_controller.step(..., gate_threshold_ratio=...) and train_mrbert use args.gate_threshold_ratio for PI and logged del%."
+    notes:
+      - "Log export may omit [Training args]; W&B run 8n8uk0ge has full config."
+      - "Do not compare EM to L3/256 runs as a clean 'L9 effect' without re-running post-fix."
+    confidence: "high"
+
   - log_file: "modal_logs/tydiqa_modal_EM03499_ap-rqoNveoPynOFoc2iKRSCnA.log"
     app_id: "ap-rqoNveoPynOFoc2iKRSCnA"
     final_val_em: 0.3499
