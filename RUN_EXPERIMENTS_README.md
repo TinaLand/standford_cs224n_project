@@ -18,7 +18,7 @@
 | 10 | MrBERT | **TyDi QA** | same as above |
 | **10b** | **MrXLM (XLM-R)** | **MRPC** | `--backbone xlmr`, same PI/gate; results include `"backbone":"xlmr"` |
 
-- **Environment variables**: `EPOCHS`, `BATCH` can be overridden (defaults 1 and 8); `SKIP_SNLI=1`, `SKIP_SST2=1`, `SKIP_TYDIQA=1` skip the corresponding datasets.
+- **Environment variables**: `EPOCHS`, `BATCH` can be overridden (defaults 1 and 8); `SKIP_SNLI=1`, `SKIP_SST2=1`, `SKIP_TYDIQA=1` skip the corresponding datasets. With `USE_WANDB=1`, you can set **`WANDB_PROJECT`** and **`WANDB_ENTITY`** so every `train_mrbert.py` invocation in the script logs to that W&B project (same charts as gated runs: `train/*`, `val/*`, etc.).
 - **Not run automatically**: `scripts/aggregate_results.py` — run it yourself after experiments to update RESULTS.md.
 
 ### Quick mode `QUICK=1 ./run_experiments.sh`
@@ -88,6 +88,55 @@ python3 train_mrbert.py --dataset tydiqa --epochs 1 --batch_size 8 --max_length 
 ```
 
 Then run `python3 scripts/aggregate_results.py` again to update RESULTS.md.
+
+### 5.1 Weights & Biases: baseline logs charts too
+
+`train_mrbert.py` uses the same W&B path for **`gate_weight=0` (baseline)** and for MrBERT/MrXLM: pass `--use_wandb` plus optional **`--wandb_project`** and **`--wandb_entity`**. Default project name if omitted is `mrbert`. Run names default to `{dataset}_baseline` or `{dataset}_mrbert` unless you set `--wandb_run_name`.
+
+**Batch script** (`run_experiments.sh`): enable logging and send all runs to team project `alina`.
+
+Minimal (only sets W&B destination; `MODELS` / `EPOCHS` / `BATCH` use script defaults):
+
+```bash
+USE_WANDB=1 WANDB_PROJECT=alina WANDB_ENTITY=aronima7-stanford-university ./run_experiments.sh
+```
+
+Example with XLM-R + longer training (same W&B target):
+
+```bash
+USE_WANDB=1 \
+WANDB_PROJECT=alina \
+WANDB_ENTITY=aronima7-stanford-university \
+MODELS=xlmr EPOCHS=5 BATCH=24 \
+./run_experiments.sh
+```
+
+(Requires `wandb login` or `WANDB_API_KEY` in the environment. TyDi post-fix runs used the same entity/project: `wandb.ai/aronima7-stanford-university/alina`.)
+
+### 5.2 XLM-R SNLI baseline → W&B `alina` (recommended `max_length` / epochs)
+
+`train_mrbert.py` flags use **underscores** (not kebab-case):
+
+```bash
+python3 train_mrbert.py \
+  --dataset snli \
+  --backbone xlmr \
+  --epochs 5 \
+  --batch_size 24 \
+  --max_length 256 \
+  --lr 2e-5 \
+  --gate_weight 0.0 \
+  --gate_layer_index 3 \
+  --gate_threshold_ratio 0.5 \
+  --log_level 1 \
+  --use_wandb \
+  --wandb_project alina \
+  --wandb_entity aronima7-stanford-university \
+  --wandb_run_name xlmr-snli-baseline-m256-ep5 \
+  --output_result results/train_results.jsonl
+```
+
+No changes to `train_mrbert.py` are required for baseline W&B curves.
 
 ---
 

@@ -21,6 +21,8 @@
 #   GATE_WARMUP_STEPS=1000 ./run_experiments.sh  # gate warmup (recommended for TyDi QA)
 #   LOG_LEVEL=1 ./run_experiments.sh        # write logs for every run (1=minimal, 2=+PI, 3=+gate details)
 #   USE_WANDB=1 ./run_experiments.sh       # log metrics to Weights & Biases (wandb)
+#   USE_WANDB=1 WANDB_PROJECT=alina WANDB_ENTITY=aronima7-stanford-university ./run_experiments.sh
+#     (optional: set project/entity for all runs in this script; omit entity to use API key default)
 
 # sample commands
 #   MODELS=bert ./run_experiments.sh
@@ -42,6 +44,12 @@ else
 fi
 if [ "${USE_WANDB:-0}" = "1" ]; then
   WANDB_ARGS=(--use_wandb)
+  if [ -n "${WANDB_PROJECT:-}" ]; then
+    WANDB_ARGS+=(--wandb_project "$WANDB_PROJECT")
+  fi
+  if [ -n "${WANDB_ENTITY:-}" ]; then
+    WANDB_ARGS+=(--wandb_entity "$WANDB_ENTITY")
+  fi
 else
   WANDB_ARGS=()
 fi
