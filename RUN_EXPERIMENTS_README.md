@@ -138,6 +138,43 @@ python3 train_mrbert.py \
 
 No changes to `train_mrbert.py` are required for baseline W&B curves.
 
+### 5.3 Modal A100: XLM-R SNLI baseline only
+
+Use `run_xlmr_snli_modal.py` (same W&B defaults as above: project `alina`, entity `aronima7-stanford-university`). Requires secret `wandb-api-key`. From **repo root**:
+
+```bash
+modal run --detach run_xlmr_snli_modal.py
+```
+
+Optional flags (OOM 时减小 batch):
+
+```bash
+modal run --detach run_xlmr_snli_modal.py --batch-size 16 --wandb-run-name xlmr-snli-baseline-try2
+```
+
+Disable W&B:
+
+```bash
+modal run --detach run_xlmr_snli_modal.py --no-use-wandb
+```
+
+Training appends **`train_results.jsonl` directly under the Volume** at `train_results.jsonl` (and `commit()` at the end). Pull everything locally:
+
+```bash
+modal volume get xlmr-results ./results_from_modal
+# jsonl path: ./results_from_modal/train_results.jsonl
+```
+
+If an **older** run only wrote under `/workspace/results` and depended on a copy step, still try `modal volume get` — the job may have copied before shutdown.
+
+**Full run logs (not SCP):** Modal logs are fetched with the **App ID** from the run’s page in the dashboard (string starting with `ap-`, not the Container ID `ta-…` or other internal ids). From repo root:
+
+```bash
+modal app logs ap-YOUR_APP_ID_HERE --timestamps > modal_logs/xlmr_snli_baseline_FULL.log
+```
+
+If `modal app list` is empty, use the same Modal account/workspace as in the browser, or open **App** → **Logs** → export from the UI.
+
 ---
 
 ## 6. Modal A100 TyDi QA (`modal_logs/`)

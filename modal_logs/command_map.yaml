@@ -121,3 +121,24 @@ runs:
     notes:
       - "historical mismatch exists between file naming and wandb run names"
       - "for future runs, use [Training args] line in stdout (recently added) as source of truth"
+
+  - log_file: "modal_logs/xlmr_snli_baseline_m256_ep5_modal_tail_20260402.log"
+    launcher: "run_xlmr_snli_modal.py"
+    dataset: "snli"
+    backbone: "xlmr"
+    gate_weight: 0.0
+    epochs: 5
+    batch_size: 24
+    max_length: 256
+    final_val_acc: 0.7435
+    duration_sec: 29353.5
+    wandb_entity: "aronima7-stanford-university"
+    wandb_project: "alina"
+    wandb_run_name: "xlmr-snli-baseline-m256-ep5-modal"
+    wandb_run_id: "0o272rzy"
+    dashboard_container_id: "ta-01KN66PS90C4YMTC1NWGC6J8DQ"
+    dashboard_run_ref: "fu-eEJuXzucKwRMsyQkAjBjVK"
+    fetch_full_logs: "modal app logs <APP_ID_FROM_MODAL_DASHBOARD> --timestamps > modal_logs/xlmr_snli_baseline_m256_ep5_modal_FULL.log"
+    notes:
+      - "Tail only in repo; APP_ID usually starts with ap- (not fu- / ta-). Copy from Modal app/run page."
+      - "Pull metrics from W&B: https://wandb.ai/aronima7-stanford-university/alina/runs/0o272rzy"

@@ -1,0 +1,43 @@
+# User-pasted tail from Modal dashboard (2026-04-02). Full stdout: run locally:
+#   modal app logs <APP_ID> --timestamps > modal_logs/xlmr_snli_baseline_m256_ep5_modal_FULL.log
+# <APP_ID> is shown on the Modal run page (usually starts with ap-). The id "fu-eEJuXzucKwRMsyQkAjBjVK"
+# may be a container/task id — if `modal app logs fu-...` fails, copy the App ID from the dashboard.
+#
+# Summary: XLM-R SNLI baseline, max_length 256, 5 ep, val acc 0.7435, duration ~29353 s, W&B run 0o272rzy
+# ------------------------------------------------------------------------------
+
+  step 113600/114455 loss: 0.1120  L_CE: 0.1120
+  step 113700/114455 loss: 0.1742  L_CE: 0.1742
+  step 113800/114455 loss: 0.2382  L_CE: 0.2382
+  step 113900/114455 loss: 0.1215  L_CE: 0.1215
+  step 114000/114455 loss: 0.1163  L_CE: 0.1163
+  step 114100/114455 loss: 0.1134  L_CE: 0.1134
+  step 114200/114455 loss: 0.1682  L_CE: 0.1682
+  step 114300/114455 loss: 0.2333  L_CE: 0.2333
+  step 114400/114455 loss: 0.1063  L_CE: 0.1063
+Epoch 5/5 avg train loss: 0.2154
+  Validation: 0.7435 (acc)
+Validation accuracy: 0.7435 (7318/9842)
+Inference: 69.04 ms/batch  |  347.6 samples/sec
+wandb: updating run metadata
+wandb: uploading config.yaml; uploading output.log; uploading wandb-summary.json
+wandb: uploading config.yaml; uploading wandb-summary.json
+wandb: 
+wandb: Run summary:
+wandb:             duration_sec 29353.5
+wandb:                    epoch 5
+wandb:                     step 114455
+wandb: sys/inference_latency_ms 69.04
+wandb: sys/inference_throughput 347.6
+wandb:           sys/latency_ms 256.46
+wandb: sys/max_memory_allocated 8.4924
+wandb:           sys/throughput 93.58
+wandb:            test/accuracy 0.74355
+wandb:                test/loss 0.25645
+wandb:                       +5 ...
+wandb: 
+wandb:  View run xlmr-snli-baseline-m256-ep5-modal at: https://wandb.ai/aronima7-stanford-university/alina/runs/0o272rzy
+wandb:  View project at: https://wandb.ai/aronima7-stanford-university/alina
+wandb: Synced 5 W&B file(s), 0 media file(s), 0 artifact file(s) and 0 other file(s)
+wandb: Find logs at: ./wandb/run-20260402_042201-0o272rzy/logs
+Result appended to results/train_results.jsonl
