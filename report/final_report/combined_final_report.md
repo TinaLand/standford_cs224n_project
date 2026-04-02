@@ -213,7 +213,7 @@ For classification tasks we report **validation accuracy** (percentage of correc
 
 Results are from `results/new/bert_from_l4/` (see `RESULTS_ANALYSIS.md`). Representative findings:
 
-- **Target 0.3, warmup 1000 (1 epoch, batch 24).** MRPC 68.38% → 68.63% (~54% del); SST-2 67.89% → 92.55% (~62% del); SNLI 74.00% → 89.02% (~76% del); XNLI 74.82% → 80.56% (~65% del); TyDi QA 20.18% → 28.16% EM (~11% del). This configuration gives the best overall trade-off across tasks.  
+- **Target 0.3, warmup 1000 (1 epoch, batch 24).** MRPC 68.38% → 68.63% (~54% del); SST-2 67.89% → 92.55% (~62% del); SNLI 74.00% → 89.02% (~76% del); XNLI 74.82% → 80.56% (~65% del); TyDi QA 20.18% → 28.16% EM (~11% del). This configuration gives the best overall trade-off across tasks. **TyDi:** the **20.18%** point is a **1-epoch L4 no-gate** baseline (weak setup); **pre-deletion blending** should be evaluated on **matched Modal** TyDi runs (e.g. **0.3471** vs **0.3562** EM in `modal_logs/`), not by comparing blend effects to **20.18%**.  
 - **Target 0.5, warmup 1000.** SNLI/SST-2/XNLI remain strong (e.g. SNLI 88.78%, SST-2 91.17%, XNLI 81.65%); TyDi QA is slightly worse than 0.3; IMDB begins to show instability.  
 - **Target 0.7, warmup 1000.** SNLI, SST-2, XNLI still beat baseline at very high deletion (~78% or more), but MRPC and IMDB degrade sharply and TyDi QA collapses to 0% EM, indicating that aggressive deletion is unsafe for QA and some classification tasks.
 

@@ -10,7 +10,7 @@ The **conclusions** are given **immediately after each table** in Section 6 (Con
 1. **Baseline strength dominates absolute accuracy.** Differences in SNLI/SST-2/MRPC (e.g. 74% vs 90%) come from **epochs and schedule**.
 2. **Delta from baseline is more comparable.** Our gate adds **+15 to +25 pp** on SNLI/SST-2 over a weak baseline; repo2's gate keeps a strong baseline almost unchanged (−0.27 to −0.62 pp). So the **same mechanism** behaves as "corrector" in our setting and "preserver" in repo2's.
 3. **Task sensitivity.** BERT: SNLI/SST-2/XNLI tolerate high deletion; MRPC/IMDB/TyDi are sensitive. XLM-R: only MRPC shows a clear gain with the gate (our A100); SST-2/SNLI/IMDB/XNLI drop.
-4. **Blending is critical for QA.** In repo2's ablations: TyDi 0.10 (no blend, L3) → 0.30 (blend L3) → 0.35 (blend L9). We implement **fixed** pre-deletion blending and a **learnable** variant (learnable denominator in the blend weight). **Evidence from `modal_logs` (Modal A100, TyDi validation EM, 3984 examples, gate L3, 3 ep):** (i) **`[Training args]` present:** no pre-deletion blend → **0.3471 EM** (~25.3% train del); **learnable blend** (`use_pre_deletion_blend=true`, `use_learnable_pre_deletion_blend=true`, init scale 30) → **0.3562 EM** (~28.6% del)—about **+0.9 pp** vs that no-blend run, with **higher deletion** (not a pure single-switch ablation). (ii) **Legacy runs (no args block):** another pair showed **0.3778 vs 0.3471** (~**+3.1 pp**) but **W&B names and flags disagree** on one job—treat as **supporting** fixed blending, not a nailed-down replicate until re-run with `[Training args]`. **L4 / 1 ep** without blending: **~0.28 EM** at ~11% deletion—**schedule, deletion level, and mechanism** all shift EM; GPU alone does not explain gaps vs repo2's **~0.35**.
+4. **Blending is critical for QA.** In repo2's ablations: TyDi 0.10 (no blend, L3) → 0.30 (blend L3) → 0.35 (blend L9). We implement **fixed** pre-deletion blending and a **learnable** variant (learnable denominator in the blend weight). **Evidence from `modal_logs` (Modal A100, TyDi validation EM, 3984 examples, gate L3, 3 ep):** (i) **`[Training args]` present:** no pre-deletion blend → **0.3471 EM** (~25.3% train del); **learnable blend** (`use_pre_deletion_blend=true`, `use_learnable_pre_deletion_blend=true`, init scale 30) → **0.3562 EM** (~28.6% del)—about **+0.9 pp** vs that no-blend run, with **higher deletion** (not a pure single-switch ablation). (ii) **Legacy runs (no args block):** another pair showed **0.3778 vs 0.3471** (~**+3.1 pp**) but **W&B names and flags disagree** on one job—treat as **supporting** fixed blending, not a nailed-down replicate until re-run with `[Training args]`. **L4 / 1 ep** without blending: **~0.28 EM** at ~11% deletion—**schedule, deletion level, and mechanism** all shift EM; GPU alone does not explain gaps vs repo2's **~0.35**. **Do not** use **20.18%** (weak L4 no-gate baseline) as the anchor for **pre-deletion blending** claims; blending must be argued from **matched Modal** pairs (**0.3471 vs 0.3562**, etc.—see §4.1 TyDi note below).
 5. **Actual deletion rate does not alone predict accuracy.** MRPC (repo2): 5.7% deletion but −17 pp; SNLI (us): 76% deletion but 89% accuracy. So **task structure and optimization** matter as much as deletion magnitude.
 6. **XLM-R on A100:** Same GPU, different baselines and outcomes—confirms that **training setup** (epochs, data, seed, gate/controller) drives the numbers; GPU does not change accuracy.
 
@@ -67,8 +67,10 @@ Our BERT runs are on **L4** (1 epoch, batch 24, gate warmup 1000, target 0.3 or 
 | **MRPC** | 68.38% (0.3) | 68.63% | 53.8% | **86.03%** | **68.71%** | 5.7% |
 | **MRPC** (0.5) | 68.87% | 68.38% | 30.1% | — | — | — |
 | **IMDB** | 87.85% (0.3) | 57.42% | 4.7% | **93.97%** | **93.03%** | 43.7% (avg seq) |
-| **TyDi QA (EM)** | 20.18% (0.3) | **28.16%** (L4, 1 ep); Modal A100 **0.3471** (no pre-deletion blend); **0.3562** (learnable blend); **0.3499** / **0.3778** (legacy, no `[Training args]`); **0.4000 peak / 0.3861 final** (post-fix L9/384 rerun) | 10.9% (L4); Modal **~25.3%** / **~28.6%** / ~24.3% / ~25.9% / **~48.0%** | 0.40 (no blend) | **0.35** (blend L9) | ~24.7% |
+| **TyDi QA (EM)** | 20.18% (0.3; weak L4 baseline†) | **28.16%** (L4, 1 ep); Modal A100 **0.3471** (no pre-deletion blend); **0.3562** (learnable blend); **0.3499** / **0.3778** (legacy, no `[Training args]`); **0.4000 peak / 0.3861 final** (post-fix L9/384 rerun) | 10.9% (L4); Modal **~25.3%** / **~28.6%** / ~24.3% / ~25.9% / **~48.0%** | 0.40 (no blend) | **0.35** (blend L9) | ~24.7% |
 | **XNLI** | 74.82% (0.3) | **80.56%** | 65.4% | — | — | — |
+
+**TyDi QA — two baselines (do not conflate):** **†20.18% EM** is from **`results/new/bert_from_l4/`** with **`gate_weight=0`**, **1 epoch**, L4-style training—appropriate only for **“gated vs no-gate under our weak L4 setup”** (e.g. vs **28.16%**). It is **not** the same protocol as Modal TyDi (3 ep, L3/L9, batch 16, etc.) and **must not** be presented as the baseline for **pre-deletion blending** ablations. For blending, cite **matched Modal** runs: **no pre-deletion blend vs blend** on the same hyperparameters (authoritative pair with `[Training args]`: **0.3471 vs 0.3562**; legacy **0.3778 vs 0.3471** with the flag/name caveats elsewhere in this report).
 
 **Conclusion (4.1):**
 
@@ -119,14 +121,14 @@ Our BERT runs are on **L4** (1 epoch, batch 24, gate warmup 1000, target 0.3 or 
 | SST-2   | **+24.66** (67.89→92.55) | **−0.62** (97.29→96.67) | Same pattern: we gain 24.66 pp; repo2 loses 0.62 pp. |
 | MRPC    | +0.25 (68.38→68.63)   | **−17.32** (86.03→68.71) | We are flat; repo2 has a large drop. MRPC is sensitive: with a strong baseline and same nominal "30% target," her setup deletes only 5.7% but accuracy collapses—likely **task + small data + gate dynamics**. |
 | IMDB    | **−30.43** (87.85→57.42) | −0.94 (93.97→93.03) | We **collapse** (gate barely activates, 4.7% del; run unstable). repo2 stays near baseline. Our IMDB is an outlier; repo2's longer max sequence length and more epochs make their run much more stable. |
-| TyDi QA  | **+7.98** (20.18→28.16% EM, L4/no blend) | −0.05 (0.40→0.35 with blend L9) | L4: large Δ vs weak baseline. Modal: **learnable vs no blend** +**~0.9 pp** (**0.3562 vs 0.3471**) with **higher deletion** on learnable. Legacy **+3.1 pp** (**0.3778 vs 0.3471**) for fixed blend—**needs `[Training args]` replicate**. **Post-fix L9/384** reaches **0.4000 peak / 0.3861 final**. |
+| TyDi QA  | **+7.98** (20.18→28.16% EM, L4/no blend; **weak L4 baseline only**) | −0.05 (0.40→0.35 with blend L9) | **+7.98 pp** is **not** comparable to blending gains: it mixes **L4 1 ep / no gate** vs **L4 gated**. **Blending:** use Modal **0.3562 vs 0.3471** (+**~0.9 pp**, deletion not matched). Legacy **+3.1 pp** (**0.3778 vs 0.3471**)—**needs `[Training args]` replicate**. **Post-fix L9/384** **0.4000 peak / 0.3861 final**. |
 
 **Takeaway:**
 
 - **SNLI / SST-2: gate helps weak baselines, preserves strong ones.** On SNLI and SST-2, our **positive Δ** shows the gate helps when the baseline is underconverged; repo2's **small negative Δ** shows the gate preserves a strong baseline. The **gate is not hurting** in either case—the apparent difference is **baseline strength**, not the mechanism.
 - **MRPC: small-data, paraphrase-sensitive, and fragile.** MRPC is the only task where repo2's gated model drops a lot (−17.32 pp) despite low actual deletion (5.7%), suggesting **dataset size and paraphrase sensitivity** interact badly with the gate/controller in that run.
 - **IMDB: instability vs stability.** IMDB on our side is unstable (one run collapses), while repo2's longer sequences and more epochs keep accuracy high—pointing again to **training schedule and input length**, not GPU.
-- **TyDi: blending matters; learnable is mixed.** L4: +7.98 pp gated vs baseline. Modal: **learnable blend beats the logged no-blend run** by **~0.9 pp** but at **higher deletion**; legacy Modal pair suggests **~+3.1 pp** for fixed blend—**re-run with `[Training args]`**. repo2's **0.35** (L9) shows **gate depth + blending** still matter.
+- **TyDi: blending matters; learnable is mixed.** L4: +7.98 pp gated vs **weak L4 no-gate** (20.18%)—**separate axis** from blending. Modal blending story: **learnable blend vs logged no-blend** **~0.9 pp** (**0.3562 vs 0.3471**) at **higher deletion**; legacy **~+3.1 pp** (**0.3778 vs 0.3471**)—**re-run with `[Training args]`**. repo2's **0.35** (L9) shows **gate depth + blending** still matter.
 
 #### 4.4.2 Actual deletion rate vs accuracy
 
@@ -164,9 +166,11 @@ Same GPU (A100), so differences are **purely from setup** (epochs, data, seed, g
 
 #### 4.4.4 TyDi QA: no blending vs blending
 
+**Baseline column semantics:** The **20.18%** row is a **no-gate, 1-epoch L4** checkpoint—useful for **coarse “weak baseline vs gated MrBERT”** stories only. Claims that **pre-deletion blending** improves TyDi must compare **no-blend vs blend under matched Modal (or otherwise matched) training** (e.g. **0.3471 vs 0.3562**), not **20.18% → …**.
+
 | Config              | Baseline EM | Gated EM | Actual del% | Note                          |
 |---------------------|-------------|----------|-------------|--------------------------------|
-| Codebase (L4, no blend) | 20.18%      | **28.16%** | 10.9%     | Span remap + warmup; 1 ep.   |
+| Codebase (L4, no blend) | 20.18% (weak L4; not Modal blend baseline) | **28.16%** | 10.9%     | Span remap + warmup; 1 ep.   |
 | **Modal A100, no pre-deletion blend, L3** (`[Training args]`) | — | **34.71%** (0.3471) | **~25.28%** | Log: `modal_logs/tydiqa_modal_EM03471_ap-4FzTHi10GW6ipDKX7fZ9TC.log`. W&B: `tydiqa-no-blend-l3-30pct`. |
 | **Modal A100, learnable blend, L3** (`[Training args]`) | — | **35.62%** (0.3562) | **~28.64%** | `use_pre_deletion_blend=true`, `use_learnable_pre_deletion_blend=true`, `pre_deletion_blend_init_scale=30`. Log: `modal_logs/tydiqa_modal_EM03562_ap-G88KtoH6OWW4NMrsTl89YX_learnableblend.log`. **~+0.9 pp** vs row above; **deletion not matched**. |
 | Modal A100, legacy “with-blend” name (no args block) | — | **34.99%** (0.3499) | **~24.34%** | `modal_logs/tydiqa_modal_EM03499_ap-rqoNveoPynOFoc2iKRSCnA.log`. |
@@ -230,7 +234,7 @@ modal run --detach run_mrbert_tydi_modal.py \
 | **SNLI MrBERT** | 89.02% | 90.21% | Baseline + setup |
 | **SST-2 baseline** | 67–80% | 97.29% | Epochs / setup |
 | **MRPC baseline** | ~68% | 86% | Epochs / setup (e.g. 5 ep MRPC) |
-| **TyDi QA EM (gated)** | ~0.28 (L4); Modal **0.3471** (no blend, args); **0.3562** (learnable blend, args); **0.3778** / **0.3499** (legacy logs); **0.4000 peak / 0.3861 final** (post-fix L9/384); **~0.089** pre-fix “limit” run **invalid** | ~0.35 (blend L9) | **Blending + epochs + gate depth**; learnable +**~0.9 pp** vs logged no-blend but **higher del**; post-fix L9/384 reaches repo2-level or better EM in this setup; keep pre-fix 0.089 only as bug record |
+| **TyDi QA EM (gated)** | ~0.28 (L4); **20.18%** = weak L4 **no-gate** only (not blend baseline); Modal **0.3471** (no blend, args); **0.3562** (learnable blend, args); **0.3778** / **0.3499** (legacy logs); **0.4000 peak / 0.3861 final** (post-fix L9/384); **~0.089** pre-fix “limit” run **invalid** | ~0.35 (blend L9) | **Blending + epochs + gate depth**; blend A/B on **matched Modal** (**0.3471 vs 0.3562**); learnable +**~0.9 pp** vs logged no-blend but **higher del**; post-fix L9/384 reaches repo2-level or better EM; pre-fix 0.089 = bug record only |
 | **XLM-R SNLI (A100)** | 33.82% bl / 33.82% MrXLM | 89.85% bl / 82.27% MrXLM | Different baselines (setup); both show fragility |
 | **Latency** | T4, 30–55% speedup | A100, 1.89× | **GPU** + same idea |
 

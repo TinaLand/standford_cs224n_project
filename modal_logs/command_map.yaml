@@ -1,3 +1,5 @@
+# TyDi reporting: ~20.18% EM in results/new/bert_from_l4 (no gate, 1 ep, L4) is a weak baseline for
+# gated-vs-ungated L4 stories only—not for pre-deletion blending; cite matched Modal EM (e.g. 0.3471 vs 0.3562).
 generated_at: "2026-04-01"
 project: "cs224n_project"
 launcher: "run_mrbert_tydi_modal.py"

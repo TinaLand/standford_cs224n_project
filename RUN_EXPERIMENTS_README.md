@@ -118,6 +118,8 @@ modal app dashboard ap-XXXXXXXX
 
 Full parameter snapshots appear in new runs as **`[Training args]`** after `Device:` (see `train_mrbert.py`).
 
+**TyDi “baseline” vs blending comparisons:** The **~20.18%** validation EM in `results/new/bert_from_l4/` (**no gate**, **1 epoch**, L4 batch/schedule) is a **weak L4 baseline** for “gated vs no-gate” narratives (paired with **~28.16%** gated L4). It is **not** the right reference for **pre-deletion blending** ablations, which must use **matched** runs—typically the Modal rows below (**e.g. 0.3471** without pre-deletion blend vs **0.3562** with learnable blend, same shared hyperparameters).
+
 | Local log file | Modal App ID | Final validation EM | Train del% (logged) | Intended launcher flags |
 |----------------|--------------|----------------------|----------------------|-------------------------|
 | `modal_logs/tydiqa_modal_EM03471_ap-4FzTHi10GW6ipDKX7fZ9TC.log` | `ap-4FzTHi10GW6ipDKX7fZ9TC` | **0.3471** | ~25.28% | `run_mrbert_tydi_modal.py` + `--no-use-pre-deletion-blend` + shared hyperparameters below |
